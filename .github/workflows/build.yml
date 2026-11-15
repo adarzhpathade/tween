@@ -114,7 +114,7 @@ jobs:
             ncnn_url: https://github.com/Tencent/ncnn/releases/download/20240410/ncnn-20240410-macos-vulkan.zip
             binary: build/rife-ncnn-vulkan-stream
           - os_name: macos-x64
-            runner_os: macos-13
+            runner_os: macos-latest
             arch: x86_64
             ncnn_url: https://github.com/Tencent/ncnn/releases/download/20240410/ncnn-20240410-macos-vulkan.zip
             binary: build/rife-ncnn-vulkan-stream
@@ -152,6 +152,9 @@ jobs:
             unzip -q ncnn.zip -d ncnn-frameworks
             ls -la ncnn-frameworks
             ls ncnn-frameworks/ncnn.framework/Headers | head -20
+            lipo -info ncnn-frameworks/ncnn.framework/ncnn || true
+            lipo -info ncnn-frameworks/glslang.framework/glslang || true
+            lipo -info ncnn-frameworks/openmp.framework/openmp || true
           else
             unzip -q ncnn.zip
             ls -la ${{ matrix.ncnn_dir }}
@@ -173,13 +176,10 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            VK_INC="/opt/homebrew/include"
-            VK_LIB="/opt/homebrew/lib/libMoltenVK.dylib"
-          else
-            VK_INC="/usr/local/include"
-            VK_LIB="/usr/local/lib/libMoltenVK.dylib"
-          fi
+          # both macOS jobs run on the arm64 runner; x86_64 is cross-compiled
+          VK_INC="/opt/homebrew/include"
+          VK_LIB="/opt/homebrew/lib/libMoltenVK.dylib"
+          lipo -info "$VK_LIB" || true
           cmake -B build -S engine/rife-stream/src -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" -DUSE_SYSTEM_NCNN=ON -DNCNN_FRAMEWORK_DIR="${{ github.workspace }}/ncnn-frameworks" -DVulkan_INCLUDE_DIR="$VK_INC" -DVulkan_LIBRARY="$VK_LIB"
 
       - name: Build RIFE stream binary
