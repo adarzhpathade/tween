@@ -142,25 +142,32 @@ pub async fn sample_system_stats(
     Ok(state.sample().await)
 }
 
+/// The explorer argument that opens a folder with `file` selected.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn explorer_select_arg(file: &str) -> String {
+    format!("/select,\"{file}\"")
+}
+
 #[tauri::command]
 pub fn show_in_folder(path: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
+        // explorer.exe does its own command-line parsing. Rust's normal quoting
+        // turns `/select,D:\My Videos\a.mp4` into `"/select,D:\My Videos\a.mp4"`,
+        // which explorer cannot parse, so it opened a default folder instead.
+        // Pass the raw argument with only the path quoted, using backslashes.
         let mut cmd = std::process::Command::new("explorer.exe");
+        let win = |q: &std::path::Path| q.display().to_string().replace('/', "\\");
         if p.is_file() {
-            cmd.arg(format!("/select,{}", p.display()));
+            cmd.raw_arg(explorer_select_arg(&win(p)));
         } else if p.is_dir() {
-            cmd.arg(p.display().to_string());
-        } else if let Some(parent) = p.parent() {
-            if parent.exists() {
-                cmd.arg(parent.display().to_string());
-            } else {
-                cmd.arg(&path);
-            }
+            cmd.raw_arg(format!("\"{}\"", win(p)));
+        } else if let Some(parent) = p.parent().filter(|q| q.exists()) {
+            cmd.raw_arg(format!("\"{}\"", win(parent)));
         } else {
-            cmd.arg(&path);
+            return Err(format!("Folder not found: {path}"));
         }
         cmd.creation_flags(0x08000000);
         let _ = cmd.spawn();
@@ -195,6 +202,14 @@ pub fn show_in_folder(path: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explorer_select_quotes_only_the_path() {
+        assert_eq!(
+            explorer_select_arg(r"D:\What I Create\Clips\Little Physics_60fps.mp4"),
+            r#"/select,"D:\What I Create\Clips\Little Physics_60fps.mp4""#
+        );
+    }
 
     #[tokio::test]
     async fn test_system_stats_sampling() {
