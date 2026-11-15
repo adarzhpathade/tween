@@ -129,6 +129,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libvulkan-dev glslang-dev glslang-tools libgomp1
 
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install vulkan-sdk -y --no-progress
+          $sdk = Get-ChildItem C:\VulkanSDK -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $sdk) { throw "Vulkan SDK not found under C:\VulkanSDK" }
+          "VULKAN_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-ChildItem "$($sdk.FullName)\Lib\vulkan-1.lib", "$($sdk.FullName)\Include\vulkan\vulkan.h"
+
       - name: Install MoltenVK (macOS)
         if: runner.os == 'macOS'
         run: brew install molten-vk libomp
@@ -141,6 +151,7 @@ jobs:
             mkdir -p ncnn-frameworks
             unzip -q ncnn.zip -d ncnn-frameworks
             ls -la ncnn-frameworks
+            ls ncnn-frameworks/ncnn.framework/Headers | head -20
           else
             unzip -q ncnn.zip
             ls -la ${{ matrix.ncnn_dir }}
@@ -148,8 +159,10 @@ jobs:
 
       - name: Configure CMake (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          cmake -B build -S engine/rife-stream/src -A x64 -DUSE_SYSTEM_NCNN=ON -Dncnn_DIR="${{ github.workspace }}/${{ matrix.ncnn_dir }}/x64/lib/cmake/ncnn" -Dglslang_DIR="${{ github.workspace }}/${{ matrix.ncnn_dir }}/x64/lib/cmake/glslang"
+          Get-ChildItem "${{ github.workspace }}/${{ matrix.ncnn_dir }}/x64/lib/cmake" -Directory | Select-Object -ExpandProperty Name
+          cmake -B build -S engine/rife-stream/src -A x64 -DVulkan_INCLUDE_DIR="$env:VULKAN_SDK/Include" -DVulkan_LIBRARY="$env:VULKAN_SDK/Lib/vulkan-1.lib" -DUSE_SYSTEM_NCNN=ON -Dncnn_DIR="${{ github.workspace }}/${{ matrix.ncnn_dir }}/x64/lib/cmake/ncnn" -Dglslang_DIR="${{ github.workspace }}/${{ matrix.ncnn_dir }}/x64/lib/cmake/glslang"
 
       - name: Configure CMake (Linux)
         if: runner.os == 'Linux'

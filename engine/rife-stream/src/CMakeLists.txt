@@ -59,6 +59,7 @@ if(USE_SYSTEM_NCNN)
             add_library(ncnn INTERFACE IMPORTED)
             target_include_directories(ncnn INTERFACE
                 "${NCNN_FRAMEWORK_DIR}/ncnn.framework/Headers"
+                "${NCNN_FRAMEWORK_DIR}/ncnn.framework/Headers/ncnn"
                 "${NCNN_FRAMEWORK_DIR}/glslang.framework/Headers"
                 "${NCNN_FRAMEWORK_DIR}/openmp.framework/Headers"
             )
