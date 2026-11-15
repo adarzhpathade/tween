@@ -113,19 +113,36 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
     }
   };
 
-  const handleCanvasClick = () => {
+  const handleCanvasClick = useCallback(() => {
     const orig = origVideoRef.current;
     const res = resVideoRef.current;
-    if (!orig || !res) return;
+    if (!orig && !res) return;
 
-    if (orig.paused) {
-      orig.play().catch(() => {});
-      res.play().catch(() => {});
+    const anyPlaying = (orig && !orig.paused) || (res && !res.paused);
+    if (anyPlaying) {
+      orig?.pause();
+      res?.pause();
     } else {
-      orig.pause();
-      res.pause();
+      orig?.play().catch(() => {});
+      res?.play().catch(() => {});
     }
-  };
+  }, []);
+
+  // Space key toggles synchronized playback
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
+        return;
+      }
+      if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        handleCanvasClick();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleCanvasClick]);
 
   // Actions
   const handleShowInFolder = () => {
@@ -259,7 +276,7 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
             onClick={handleCanvasClick}
             style={{ cursor: "pointer" }}
           >
-            <div className="scene orig">
+            <div className={`scene orig ${isMock ? "mock" : ""}`}>
               {origSrc ? (
                 <video
                   ref={origVideoRef}
@@ -276,7 +293,7 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
               ) : null}
             </div>
 
-            <div className="scene res" id="res">
+            <div className={`scene res ${isMock ? "mock" : ""}`} id="res">
               {resSrc ? (
                 <video
                   ref={resVideoRef}

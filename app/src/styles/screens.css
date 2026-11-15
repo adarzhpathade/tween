@@ -103,6 +103,10 @@
 .scene {
   position: absolute;
   inset: 0;
+  background: #000;
+}
+
+.scene.mock {
   background: radial-gradient(circle at 68% 58%, #a9b79a44 0 7%, transparent 22%),
               radial-gradient(circle at 68% 58%, #a9b79acc 0 1.6%, transparent 1.8%),
               linear-gradient(135deg, #262626, #0e0e0e);
@@ -299,6 +303,16 @@
   min-width: 1px;
   height: 70%;
   background: #ffffff55;
+  border-radius: 1px;
+}
+
+.film img {
+  height: 100%;
+  flex: 1 1 0;
+  min-width: 0;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
   border-radius: 1px;
 }
 

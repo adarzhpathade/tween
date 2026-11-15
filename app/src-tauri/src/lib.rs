@@ -20,6 +20,7 @@ pub fn run() {
             setup::open_url,
             pipeline::probe_video,
             pipeline::extract_frame,
+            pipeline::extract_thumbnails,
             pipeline::pick_video_file,
             pipeline::pick_output_folder,
             pipeline::start_job,
