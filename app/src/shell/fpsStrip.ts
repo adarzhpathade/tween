@@ -16,6 +16,23 @@ export function formatFps(fps: number): string {
   return String(rounded);
 }
 
+export function getFpsFontSize(val: number | string | null | undefined): number {
+  if (val === null || val === undefined) return 46;
+  const str = typeof val === "number" ? formatFps(val) : String(val).trim();
+  const len = str.length;
+  if (len <= 3) return 46;
+  if (len <= 5) return 30;
+  return 24;
+}
+
+export function stepFpsAnimation(from: number, to: number, progress: number): number {
+  if (progress >= 1) return to;
+  if (progress <= 0) return Math.round(from);
+  const p = Math.min(1, Math.max(0, progress));
+  const e = 1 - Math.pow(1 - p, 3);
+  return Math.round(from + (to - from) * e);
+}
+
 export function computeMinCustomFps(sourceFps: number | null): number {
   return sourceFps ? Math.floor(sourceFps) + 1 : 1;
 }

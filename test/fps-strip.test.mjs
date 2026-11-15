@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert';
 import {
   formatFps,
+  getFpsFontSize,
+  stepFpsAnimation,
   computeMinCustomFps,
   computeFpsRows,
   checkCustomVal,
@@ -135,4 +137,48 @@ test('clampCustomVal: corrects to nearest valid range [minCustomFps, 240]', () =
   // Fallback when undefined
   assert.strictEqual(clampCustomVal(undefined, 24, 90), 90);
   assert.strictEqual(clampCustomVal(undefined, 24, null), 25);
+});
+
+test('getFpsFontSize: fitting rule by character count of final value', () => {
+  // 1-3 chars -> current size (46)
+  assert.strictEqual(getFpsFontSize(60), 46);
+  assert.strictEqual(getFpsFontSize(120), 46);
+  assert.strictEqual(getFpsFontSize(240), 46);
+  assert.strictEqual(getFpsFontSize('90'), 46);
+  assert.strictEqual(getFpsFontSize(null), 46);
+  assert.strictEqual(getFpsFontSize(undefined), 46);
+
+  // 4-5 chars -> smaller size (30)
+  // Non-integer sources at most 2 decimals
+  assert.strictEqual(getFpsFontSize(95.9), 30); // '95.9' -> 4 chars
+  assert.strictEqual(getFpsFontSize(47.95), 30); // '47.95' -> 5 chars
+  assert.strictEqual(getFpsFontSize(71.93), 30); // '71.93' -> 5 chars
+  assert.strictEqual(getFpsFontSize('100.5'), 30); // 5 chars
+
+  // 6 or more chars -> smaller again (24)
+  assert.strictEqual(getFpsFontSize(176.46), 24); // '176.46' -> 6 chars
+  assert.strictEqual(getFpsFontSize(239.76), 24); // '239.76' -> 6 chars
+  assert.strictEqual(getFpsFontSize('123456'), 24);
+  assert.strictEqual(getFpsFontSize('1234567'), 24);
+});
+
+test('stepFpsAnimation: whole numbers mid-animation and exact final value on completion', () => {
+  // Animating between integer endpoints
+  const mid1 = stepFpsAnimation(24, 60, 0.5);
+  assert.strictEqual(Number.isInteger(mid1), true);
+  assert.strictEqual(stepFpsAnimation(24, 60, 1.0), 60);
+  assert.strictEqual(stepFpsAnimation(24, 60, 1.5), 60);
+
+  // Animating to non-integer target (e.g. 71.93)
+  const steps = [0.1, 0.25, 0.5, 0.75, 0.9, 0.99];
+  for (const p of steps) {
+    const val = stepFpsAnimation(24, 71.93, p);
+    // Mid-animation must show whole numbers only
+    assert.strictEqual(Number.isInteger(val), true, `Progress ${p} produced non-integer ${val}`);
+  }
+
+  // Exact target value when complete (progress >= 1.0)
+  assert.strictEqual(stepFpsAnimation(24, 71.93, 1.0), 71.93);
+  assert.strictEqual(stepFpsAnimation(60, 176.46, 1.0), 176.46);
+  assert.strictEqual(stepFpsAnimation(24, 47.95, 1.0), 47.95);
 });

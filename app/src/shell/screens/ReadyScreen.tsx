@@ -7,6 +7,8 @@ import {
   MAX_FPS,
   type FpsRow,
   formatFps,
+  getFpsFontSize,
+  stepFpsAnimation,
   computeMinCustomFps,
   computeFpsRows,
   checkCustomVal,
@@ -224,11 +226,12 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const [view, setView] = useState<"orig" | "res">("res");
   const origBtnRef = useRef<HTMLButtonElement | null>(null);
   const resBtnRef = useRef<HTMLButtonElement | null>(null);
+  const vswRef = useRef<HTMLDivElement | null>(null);
   const [viewPillStyle, setViewPillStyle] = useState<React.CSSProperties>({});
 
   const updateViewPill = useCallback(() => {
     const activeBtn = view === "orig" ? origBtnRef.current : resBtnRef.current;
-    if (activeBtn) {
+    if (activeBtn && activeBtn.offsetWidth > 0) {
       setViewPillStyle({
         transform: `translateX(${activeBtn.offsetLeft}px)`,
         width: `${activeBtn.offsetWidth}px`,
@@ -236,12 +239,34 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     }
   }, [view]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     updateViewPill();
+    const id = requestAnimationFrame(updateViewPill);
+    return () => cancelAnimationFrame(id);
+  }, [updateViewPill, isLoaded, sourceFps]);
+
+  useEffect(() => {
+    const el = vswRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => updateViewPill());
+    ro.observe(el);
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(() => updateViewPill());
+    }
+    window.addEventListener("resize", updateViewPill);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", updateViewPill);
+    };
   }, [updateViewPill]);
 
   const videoSrc = useMemo(() => {
-    return probeInfo?.file ? convertFileSrc(probeInfo.file) : "";
+    if (!probeInfo?.file) return "";
+    try {
+      return convertFileSrc(probeInfo.file);
+    } catch {
+      return probeInfo.file;
+    }
   }, [probeInfo?.file]);
 
   // Output folder: starts empty or with defaults until a video is probed or user picks one
@@ -278,6 +303,11 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const minCustomFps = computeMinCustomFps(sourceFps);
 
   const [selectedChoice, setSelectedChoice] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search);
+      const ch = p.get("choice");
+      if (ch) return ch;
+    }
     const saved = localStorage.getItem("tween_last_fps_choice");
     return saved || "2×";
   });
@@ -292,6 +322,8 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const [customInputStr, setCustomInputStr] = useState<string>("");
   const [inputErr, setInputErr] = useState<string | null>(null);
 
+  const frailRef = useRef<HTMLElement | null>(null);
+  const fsegRef = useRef<HTMLDivElement | null>(null);
   const rvRef = useRef<HTMLDivElement | null>(null);
   const fpsToRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -324,6 +356,14 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     return activeRow.fps;
   }, [selectedChoice, fpsRows, sourceFps, customFps, minCustomFps]);
 
+  // Final target fps or custom input determines font size so counter fits strip
+  const counterFontSize = useMemo(() => {
+    if (isEditingCustom) {
+      return getFpsFontSize(customInputStr);
+    }
+    return getFpsFontSize(targetFps);
+  }, [isEditingCustom, customInputStr, targetFps]);
+
   // Animated counting number for Target FPS
   const [displayFps, setDisplayFps] = useState<number | null>(targetFps);
   const animRef = useRef<number>(0);
@@ -350,8 +390,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
     const tick = (now: number) => {
       const p = Math.min(1, (now - t0) / d);
-      const e = 1 - Math.pow(1 - p, 3);
-      const val = from + (to - from) * e;
+      const val = stepFpsAnimation(from, to, p);
       setDisplayFps(val);
       if (p < 1) {
         animRef.current = requestAnimationFrame(tick);
@@ -363,7 +402,10 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     cancelAnimationFrame(animRef.current);
     animRef.current = requestAnimationFrame(tick);
 
-    return () => cancelAnimationFrame(animRef.current);
+    return () => {
+      cancelAnimationFrame(animRef.current);
+      setDisplayFps(to);
+    };
   }, [targetFps, isEditingCustom]);
 
   // Validation helper for Custom input
@@ -400,7 +442,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       requestAnimationFrame(() => {
         if (inputRef.current) {
           inputRef.current.focus();
-          inputRef.current.select();
         }
       });
     },
@@ -520,7 +561,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         el.removeEventListener("pointercancel", onUp);
         if (!moved) {
           el.focus();
-          el.select();
         }
       };
 
@@ -584,11 +624,28 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
   useLayoutEffect(() => {
     updateRailPill();
-  }, [updateRailPill, fpsRows]);
+    const id = requestAnimationFrame(updateRailPill);
+    return () => cancelAnimationFrame(id);
+  }, [updateRailPill, fpsRows, selectedChoice]);
 
   useEffect(() => {
+    const el = fsegRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      updateRailPill();
+    });
+    ro.observe(el);
+    if (frailRef.current) {
+      ro.observe(frailRef.current);
+    }
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(() => updateRailPill());
+    }
     window.addEventListener("resize", updateRailPill);
-    return () => window.removeEventListener("resize", updateRailPill);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", updateRailPill);
+    };
   }, [updateRailPill]);
 
   const currentGainFrames = useMemo(() => {
@@ -1350,7 +1407,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
                 </div>
               )}
 
-              <div className="vsw v-ready v-done" id="vsw" role="tablist">
+              <div className="vsw v-ready v-done" id="vsw" ref={vswRef} role="tablist">
                 <i className="vpill" id="vpill" style={viewPillStyle} />
                 <button
                   ref={origBtnRef}
@@ -1544,6 +1601,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
       {/* Frame Rate Strip (Column 2) */}
       <aside
+        ref={frailRef}
         className={`frail nv ${isEditingCustom ? "editing" : ""}`}
         data-file={isLoaded ? "loaded" : "none"}
       >
@@ -1558,7 +1616,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
             </span>{" "}
             <i>→</i>
           </div>
-          <div className="fr1" id="fpsTo" ref={fpsToRef}>
+          <div className="fr1" id="fpsTo" ref={fpsToRef} style={{ fontSize: `${counterFontSize}px` }}>
             {isLoaded && displayFps !== null ? formatFps(displayFps) : "—"}
           </div>
           <input
@@ -1574,6 +1632,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
             onChange={handleInputChange}
             onKeyDown={handleInputKeyDown}
             onPointerDown={handleInputPointerDown}
+            style={{ fontSize: `${counterFontSize}px` }}
           />
           <small>fps</small>
           <div className="stp" id="fpsStp">
@@ -1601,12 +1660,14 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
             />
           </div>
           <div className={`fhint ${inputErr ? "bad" : ""}`} id="fpsHint">
-            {inputErr ||
-              `Enter to apply · Esc to cancel · ${minCustomFps}–${MAXF}`}
+            <span className="fhint-l1">Enter apply · Esc cancel</span>
+            <span className="fhint-l2">
+              {inputErr || `${minCustomFps}–${MAXF}`}
+            </span>
           </div>
         </div>
 
-        <div className="fseg v" id="fseg">
+        <div className="fseg v" id="fseg" ref={fsegRef}>
           <i className="pill" id="pill" style={railPillStyle} />
           {fpsRows.map((r) => {
             const isSelected = selectedChoice === r.key;
