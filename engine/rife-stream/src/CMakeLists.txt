@@ -1,10 +1,9 @@
+cmake_minimum_required(VERSION 3.15)
 cmake_policy(SET CMP0091 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 project(rife-ncnn-vulkan)
-
-cmake_minimum_required(VERSION 3.9)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE release CACHE STRING "Choose the type of build" FORCE)
@@ -54,36 +53,90 @@ else()
 endif()
 
 if(USE_SYSTEM_NCNN)
-    set(GLSLANG_TARGET_DIR "GLSLANG-NOTFOUND" CACHE PATH "Absolute path to glslangTargets.cmake directory")
-    if(NOT GLSLANG_TARGET_DIR AND NOT DEFINED ENV{GLSLANG_TARGET_DIR})
-        message(WARNING "GLSLANG_TARGET_DIR must be defined! USE_SYSTEM_NCNN will be turned off.")
-        set(USE_SYSTEM_NCNN OFF)
+    if(APPLE AND (DEFINED NCNN_FRAMEWORK_DIR OR EXISTS "${NCNN_FRAMEWORK_DIR}/ncnn.framework"))
+        message(STATUS "Using macOS ncnn frameworks at ${NCNN_FRAMEWORK_DIR}")
+        if(NOT TARGET ncnn)
+            add_library(ncnn INTERFACE IMPORTED)
+            target_include_directories(ncnn INTERFACE
+                "${NCNN_FRAMEWORK_DIR}/ncnn.framework/Headers"
+                "${NCNN_FRAMEWORK_DIR}/glslang.framework/Headers"
+                "${NCNN_FRAMEWORK_DIR}/openmp.framework/Headers"
+            )
+            target_link_libraries(ncnn INTERFACE
+                "-F${NCNN_FRAMEWORK_DIR}"
+                "-framework ncnn"
+                "-framework glslang"
+                "-framework openmp"
+            )
+        endif()
+        if(NOT TARGET glslang)
+            add_library(glslang INTERFACE IMPORTED)
+        endif()
+        if(NOT TARGET SPIRV)
+            add_library(SPIRV INTERFACE IMPORTED)
+        endif()
     else()
-        message(STATUS "Using glslang install located at ${GLSLANG_TARGET_DIR}")
-
-        find_package(Threads)
-
-        include("${GLSLANG_TARGET_DIR}/OSDependentTargets.cmake")
-        include("${GLSLANG_TARGET_DIR}/OGLCompilerTargets.cmake")
-        if(EXISTS "${GLSLANG_TARGET_DIR}/HLSLTargets.cmake")
-            # hlsl support can be optional
-            include("${GLSLANG_TARGET_DIR}/HLSLTargets.cmake")
+        # Find glslang targets
+        if(NOT TARGET glslang::glslang AND NOT TARGET glslang)
+            find_package(glslang QUIET CONFIG)
         endif()
-        include("${GLSLANG_TARGET_DIR}/glslangTargets.cmake")
-        include("${GLSLANG_TARGET_DIR}/SPIRVTargets.cmake")
 
-        if (NOT TARGET glslang OR NOT TARGET SPIRV)
-            message(WARNING "glslang or SPIRV target not found! USE_SYSTEM_NCNN will be turned off.")
-            set(USE_SYSTEM_NCNN OFF)
+        if(NOT TARGET glslang::glslang AND NOT TARGET glslang)
+            set(GLSLANG_CANDIDATE_DIRS
+                "${GLSLANG_TARGET_DIR}"
+                "${glslang_DIR}"
+                "${ncnn_DIR}/../glslang"
+                "${ncnn_DIR}/../../glslang"
+            )
+            foreach(_dir IN LISTS GLSLANG_CANDIDATE_DIRS)
+                if(EXISTS "${_dir}/glslang-config.cmake")
+                    find_package(glslang QUIET CONFIG PATHS "${_dir}" NO_DEFAULT_PATH)
+                    if(TARGET glslang::glslang OR TARGET glslang)
+                        break()
+                    endif()
+                elseif(EXISTS "${_dir}/glslang-targets.cmake")
+                    include("${_dir}/glslang-targets.cmake")
+                    if(TARGET glslang::glslang OR TARGET glslang)
+                        break()
+                    endif()
+                elseif(EXISTS "${_dir}/glslangTargets.cmake")
+                    include("${_dir}/OSDependentTargets.cmake" OPTIONAL)
+                    include("${_dir}/OGLCompilerTargets.cmake" OPTIONAL)
+                    include("${_dir}/HLSLTargets.cmake" OPTIONAL)
+                    include("${_dir}/glslangTargets.cmake" OPTIONAL)
+                    include("${_dir}/SPIRVTargets.cmake" OPTIONAL)
+                    if(TARGET glslang::glslang OR TARGET glslang)
+                        break()
+                    endif()
+                endif()
+            endforeach()
         endif()
-    endif()
-endif()
 
-if(USE_SYSTEM_NCNN)
-    find_package(ncnn)
-    if(NOT TARGET ncnn)
-        message(WARNING "ncnn target not found! USE_SYSTEM_NCNN will be turned off.")
-        set(USE_SYSTEM_NCNN OFF)
+        # Create aliases so both glslang and glslang::glslang (and SPIRV / glslang::SPIRV) exist
+        if(TARGET glslang::glslang AND NOT TARGET glslang)
+            add_library(glslang ALIAS glslang::glslang)
+        endif()
+        if(TARGET glslang::SPIRV AND NOT TARGET SPIRV)
+            add_library(SPIRV ALIAS glslang::SPIRV)
+        endif()
+        if(TARGET glslang AND NOT TARGET glslang::glslang)
+            add_library(glslang::glslang ALIAS glslang)
+        endif()
+        if(TARGET SPIRV AND NOT TARGET glslang::SPIRV)
+            add_library(glslang::SPIRV ALIAS SPIRV)
+        endif()
+
+        # Find ncnn package
+        if(NOT TARGET ncnn)
+            find_package(ncnn QUIET CONFIG)
+        endif()
+        if(NOT TARGET ncnn)
+            find_package(ncnn QUIET)
+        endif()
+
+        if(NOT TARGET ncnn)
+            message(FATAL_ERROR "USE_SYSTEM_NCNN was requested but ncnn target was not found! Check ncnn_DIR or CMAKE_PREFIX_PATH.")
+        endif()
     endif()
 endif()
 
