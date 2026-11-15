@@ -32,7 +32,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <i></i>
         {statusLabel}
       </span>
-      {gpu ? <span>{gpu}</span> : null}
+      <span>{gpu ?? "—"}</span>
       <span className="sp" />
       {engine ? <span>{engine}</span> : null}
     </footer>

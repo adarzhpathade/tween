@@ -111,7 +111,7 @@ export const ScreenRouter: React.FC = () => {
 
   return (
     <div className="win" data-state={screen}>
-      <TitleBar title={title} brand="flowmotion" />
+      <TitleBar title={title} brand="Tween" />
       <AnimatePresence mode="wait">
         <MainGrid key={screen} screen={screen}>
           {renderScreen()}

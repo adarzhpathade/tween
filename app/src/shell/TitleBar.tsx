@@ -7,8 +7,8 @@ export interface TitleBarProps {
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
-  title = "Welcome",
-  brand = "flowmotion",
+  title = "Tween",
+  brand = "Tween",
 }) => {
   const handleMinimize = async () => {
     try {
