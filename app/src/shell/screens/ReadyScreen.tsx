@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { invoke } from "@tauri-apps/api/core";
 import { useScreen } from "../ScreenRouter";
 import type { Screen, ProbeInfo, ColourInfo, JobRequest } from "../types";
+import { loadSettingsDefaults } from "../settingsTypes";
 
 export type { ColourInfo, ProbeInfo };
 
@@ -183,12 +184,14 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const [posterUrl, setPosterUrl] = useState<string | null>(null);
   const [view, setView] = useState<"orig" | "res">("res");
 
-  // Output folder: starts empty until a video is probed or user picks one
-  const [outputFolder, setOutputFolder] = useState<string>("");
+  // Output folder: starts empty or with defaults until a video is probed or user picks one
+  const [outputFolder, setOutputFolder] = useState<string>(() => {
+    return loadSettingsDefaults().outputFolder || "";
+  });
 
   // Settings persistence
   const [selectedModel, setSelectedModel] = useState<string>(() => {
-    return localStorage.getItem("tween_last_model") || "rife-v4.26";
+    return loadSettingsDefaults().model || localStorage.getItem("tween_last_model") || "rife-v4.26";
   });
 
   const [selectedEncoder, setSelectedEncoder] = useState<string>(() => {
@@ -196,11 +199,19 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   });
 
   const [quality, setQuality] = useState<number>(() => {
+    const defs = loadSettingsDefaults();
+    if (defs.quality) return defs.quality;
     const saved = localStorage.getItem("tween_last_quality");
     return saved ? parseInt(saved, 10) : 18;
   });
 
-  const [keepAudio, setKeepAudio] = useState<boolean>(true);
+  const [keepAudio, setKeepAudio] = useState<boolean>(() => {
+    return loadSettingsDefaults().keepAudio ?? true;
+  });
+
+  const [sceneDetect, setSceneDetect] = useState<boolean>(() => {
+    return loadSettingsDefaults().sceneDetect ?? true;
+  });
 
   // Frame rate strip state
   type FpsOption = "2×" | "3×" | "4×" | "60" | "120" | "Custom";
@@ -351,6 +362,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       encoder: selectedEncoder || setupConfig?.encoders?.[0] || "libx264",
       quality: quality,
       keepAudio: keepAudio,
+      sceneDetect: sceneDetect,
       output: outPath,
       trim: inT > 0 || (outT > 0 && outT < duration) ? { start: inT, end: outT } : undefined,
     };
@@ -373,6 +385,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     outputFolder,
     setupConfig,
     keepAudio,
+    sceneDetect,
     inT,
     outT,
     duration,
@@ -407,12 +420,29 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       const info = await invoke<ProbeInfo>("probe_video", { path: filePath });
       setProbeInfo(info);
 
-      // Default output folder to source video directory
-      const lastSlash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
-      if (lastSlash > 0) {
-        setOutputFolder(filePath.slice(0, lastSlash));
+      // Apply defaults from settings
+      const defs = loadSettingsDefaults();
+      if (defs.outputFolder) {
+        setOutputFolder(defs.outputFolder);
       } else {
-        setOutputFolder(filePath);
+        const lastSlash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+        if (lastSlash > 0) {
+          setOutputFolder(filePath.slice(0, lastSlash));
+        } else {
+          setOutputFolder(filePath);
+        }
+      }
+      if (defs.model) {
+        setSelectedModel(defs.model);
+      }
+      if (typeof defs.quality === "number") {
+        setQuality(defs.quality);
+      }
+      if (typeof defs.keepAudio === "boolean") {
+        setKeepAudio(defs.keepAudio);
+      }
+      if (typeof defs.sceneDetect === "boolean") {
+        setSceneDetect(defs.sceneDetect);
       }
 
       // Extract poster frame

@@ -59,6 +59,7 @@ export interface JobRequest {
   encoder: string;
   quality?: number;
   keepAudio?: boolean;
+  sceneDetect?: boolean;
   output: string;
   tempRoot?: string;
   trim?: Trim;

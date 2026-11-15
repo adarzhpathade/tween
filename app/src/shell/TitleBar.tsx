@@ -4,11 +4,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 export interface TitleBarProps {
   title?: string;
   brand?: string;
+  settingsOpen?: boolean;
+  onToggleSettings?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
   title = "Tween",
   brand = "Tween",
+  settingsOpen = false,
+  onToggleSettings,
 }) => {
   const handleMinimize = async () => {
     try {
@@ -46,6 +50,20 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         {title}
       </div>
       <div className="wc" data-tauri-drag-region="false">
+        <button
+          type="button"
+          id="setBtn"
+          className={settingsOpen ? "on" : ""}
+          onClick={onToggleSettings}
+          aria-label="Settings"
+          title="Settings"
+        >
+          <svg viewBox="0 0 12 12">
+            <path d="M1 3.5h4M9 3.5h2M1 8.5h2M7 8.5h4" />
+            <circle cx="7" cy="3.5" r="1.6" />
+            <circle cx="5" cy="8.5" r="1.6" />
+          </svg>
+        </button>
         <button
           type="button"
           onClick={handleMinimize}

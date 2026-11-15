@@ -25,7 +25,9 @@ pub fn run() {
             pipeline::start_job,
             pipeline::cancel_job,
             pipeline::stats::sample_system_stats,
-            pipeline::stats::show_in_folder
+            pipeline::stats::show_in_folder,
+            pipeline::clean::storage_info,
+            pipeline::clean::clear_temp
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
