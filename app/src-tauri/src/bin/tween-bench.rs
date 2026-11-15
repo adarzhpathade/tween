@@ -40,7 +40,23 @@ fn format_timestamp() -> String {
     )
 }
 
-fn locate_setup_config() -> Option<(PipelineConfig, String)> {
+fn get_version() -> String {
+    let pkg_ver = env!("CARGO_PKG_VERSION");
+    if let Ok(out) = std::process::Command::new("git")
+        .args(["describe", "--tags", "--always", "--dirty"])
+        .output()
+    {
+        if out.status.success() {
+            let desc = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !desc.is_empty() {
+                return format!("{} ({})", pkg_ver, desc);
+            }
+        }
+    }
+    pkg_ver.to_string()
+}
+
+fn locate_setup_config() -> Option<(PipelineConfig, String, String)> {
     if std::env::var("TWEEN_FORCE_NO_SETUP").is_ok() {
         return None;
     }
@@ -88,6 +104,19 @@ fn locate_setup_config() -> Option<(PipelineConfig, String)> {
         if mode != "gpu" {
             continue;
         }
+
+        let engine_mode = val
+            .get("engineMode")
+            .or_else(|| val.get("engine_mode"))
+            .and_then(|v| v.as_str())
+            .map(|s| {
+                if s.eq_ignore_ascii_case("stream") {
+                    "Stream".to_string()
+                } else {
+                    "File".to_string()
+                }
+            })
+            .unwrap_or_else(|| "File".to_string());
 
         let gpu_val = match val.get("gpu") {
             Some(g) if g.is_object() => g,
@@ -170,7 +199,7 @@ fn locate_setup_config() -> Option<(PipelineConfig, String)> {
             rife_cmd: None,
         };
 
-        return Some((cfg, gpu_name));
+        return Some((cfg, gpu_name, engine_mode));
     }
 
     None
@@ -196,7 +225,7 @@ fn pick_encoder(cfg: &PipelineConfig) -> String {
 
 #[tokio::main]
 async fn main() {
-    let (cfg, gpu_name) = match locate_setup_config() {
+    let (cfg, gpu_name, engine_mode) = match locate_setup_config() {
         Some(c) => c,
         None => {
             eprintln!("no GPU engine installed");
@@ -215,8 +244,9 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let clip_path = bench_work.join("bench-1080p-24fps-20s.mp4");
-    println!("Generating benchmark test clip (1080p, 24 fps, 20 s)...");
+    // 8 seconds of generated 1080p 24 fps (testsrc2 + mandelbrot, hard cut at 4 s, 440 Hz audio)
+    let clip_path = bench_work.join("bench-1080p-24fps-8s.mp4");
+    println!("Generating benchmark test clip (1080p, 24 fps, 8 s, testsrc2 + mandelbrot)...");
 
     let gen_status = tokio::process::Command::new(&cfg.ffmpeg)
         .args([
@@ -227,15 +257,25 @@ async fn main() {
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=size=1920x1080:rate=24:duration=20",
+            "testsrc2=size=1920x1080:rate=24:duration=4",
             "-f",
             "lavfi",
             "-i",
-            "sine=frequency=440:duration=20",
+            "mandelbrot=size=1920x1080:rate=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=8",
+            "-filter_complex",
+            "[1:v]trim=duration=4,setpts=PTS-STARTPTS,format=yuv420p[b];[0:v]format=yuv420p[a];[a][b]concat=n=2:v=1[v]",
+            "-map",
+            "[v]",
+            "-map",
+            "2:a",
             "-c:v",
             "libx264",
-            "-pix_fmt",
-            "yuv420p",
+            "-crf",
+            "16",
             "-c:a",
             "aac",
             "-shortest",
@@ -269,7 +309,7 @@ async fn main() {
 
     let out_path = bench_work.join("bench-output.mp4");
     let req = JobRequest {
-        info: probe_info,
+        info: probe_info.clone(),
         target: Target {
             mode: "multiplier".to_string(),
             value: TargetValue::Number(2.0),
@@ -309,27 +349,65 @@ async fn main() {
     println!();
 
     if !res.ok {
-        eprintln!(
-            "Benchmark pipeline failed: {}",
-            res.error.as_deref().unwrap_or("unknown error")
-        );
+        let err_msg = res.error.as_deref().unwrap_or("unknown pipeline error");
+        eprintln!("Benchmark pipeline failed: {}", err_msg);
         let _ = std::fs::remove_dir_all(&bench_work);
         std::process::exit(1);
     }
 
-    let total_seconds = res.seconds.unwrap_or(1.0);
-    let total_frames = res.frames.unwrap_or(960);
-    let output_fps = (total_frames as f64) / total_seconds.max(0.001);
-    let peak_disk_bytes = res.peak_temp_bytes.unwrap_or(0);
+    let total_seconds = match res.seconds {
+        Some(s) if s > 0.0 => s,
+        _ => {
+            eprintln!("Benchmark failed: job finished without valid elapsed time");
+            let _ = std::fs::remove_dir_all(&bench_work);
+            std::process::exit(1);
+        }
+    };
+
+    let total_frames = match res.frames {
+        Some(f) if f > 0 => f,
+        _ => {
+            eprintln!("Benchmark failed: job finished without valid output frames count");
+            let _ = std::fs::remove_dir_all(&bench_work);
+            std::process::exit(1);
+        }
+    };
+
+    let peak_disk_bytes = match res.peak_temp_bytes {
+        Some(b) => b,
+        None => {
+            eprintln!("Benchmark failed: job finished without recorded peak disk usage");
+            let _ = std::fs::remove_dir_all(&bench_work);
+            std::process::exit(1);
+        }
+    };
+
+    let stage_times = match res.stage_times {
+        Some(st) => st,
+        None => {
+            eprintln!("Benchmark failed: job finished without recorded stage times");
+            let _ = std::fs::remove_dir_all(&bench_work);
+            std::process::exit(1);
+        }
+    };
+
+    let output_fps = (total_frames as f64) / total_seconds;
     let peak_disk_mb = (peak_disk_bytes as f64) / 1_048_576.0;
 
-    let stage_times = res.stage_times.unwrap_or_default();
-    let projected_10min_seconds = 28800.0 / output_fps.max(0.001);
+    let projected_10min_seconds = 28800.0 / output_fps;
     let projected_mins = (projected_10min_seconds / 60.0).round() as u64;
 
+    let version_str = get_version();
+    let job_desc = format!(
+        "{}p {}->{} Smooth",
+        probe_info.height,
+        probe_info.fps.round() as u64,
+        (probe_info.fps * 2.0).round() as u64
+    );
+
     let readme_row = format!(
-        "| Speed update 1 (quick wins) | File, tuned | Smooth, 2× | **{:.1}** | ~{} min |",
-        output_fps, projected_mins
+        "| {} | {} | {} | **{:.1}** | ~{} min |",
+        version_str, engine_mode, job_desc, output_fps, projected_mins
     );
 
     println!();
@@ -339,7 +417,15 @@ async fn main() {
     println!("GPU:            {}", gpu_name);
     println!("Encoder:        {}", encoder);
     println!("Model:          RIFE v4.26 (Smooth @ 2×)");
-    println!("Clip:           1920×1080 24 fps (20 s, 480 in -> {} out frames)", total_frames);
+    println!(
+        "Clip:           {}×{} {:.2} fps ({:.1} s, {} in -> {} out frames)",
+        probe_info.width,
+        probe_info.height,
+        probe_info.fps,
+        probe_info.duration,
+        probe_info.frames,
+        total_frames
+    );
     println!();
     println!("Results:");
     println!("  Total time:     {:.2} s", total_seconds);
@@ -375,18 +461,18 @@ async fn main() {
 
     let json_val = serde_json::json!({
         "timestamp": timestamp_str,
-        "version": "0.1.0",
-        "engineMode": "File, tuned",
-        "job": "Smooth, 2×",
+        "version": version_str,
+        "engineMode": engine_mode,
+        "job": job_desc,
         "gpu": gpu_name,
         "encoder": encoder,
         "model": "rife-v4.26",
         "clip": {
-            "width": 1920,
-            "height": 1080,
-            "fps": 24.0,
-            "duration": 20.0,
-            "framesIn": 480,
+            "width": probe_info.width,
+            "height": probe_info.height,
+            "fps": probe_info.fps,
+            "duration": probe_info.duration,
+            "framesIn": probe_info.frames,
             "framesOut": total_frames
         },
         "results": {
