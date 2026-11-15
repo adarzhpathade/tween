@@ -1,0 +1,78 @@
+name: Build and Package
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - 'task/**'
+  pull_request:
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            squashfs-tools
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install Node dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Run Cargo tests
+        run: cargo test --manifest-path app/src-tauri/Cargo.toml
+
+      - name: Build Tauri app
+        working-directory: app
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            npm run tauri build -- --target universal-apple-darwin || npm run tauri build
+          else
+            npm run tauri build
+          fi
+        shell: bash
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tween-${{ matrix.os }}
+          path: |
+            app/src-tauri/target/**/bundle/nsis/*.exe
+            app/src-tauri/target/**/bundle/dmg/*.dmg
+            app/src-tauri/target/**/bundle/deb/*.deb
+            app/src-tauri/target/**/bundle/appimage/*.AppImage
+          if-no-files-found: warn
