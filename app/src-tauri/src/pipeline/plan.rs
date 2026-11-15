@@ -295,6 +295,59 @@ mod tests {
     }
 
     #[test]
+    fn test_stream_frame_time_cut_handling() {
+        let mut cuts = HashSet::new();
+        // Cut at frame index 2 (1-based, meaning between frame 1 and frame 2 in 0-based indices)
+        cuts.insert(2);
+
+        // Test 2x interpolation: 5 input frames -> 10 output frames
+        let times_2x = build_frame_times(5, 10, &cuts);
+        assert_eq!(times_2x.len(), 10);
+        // Source frame 0 pass-through
+        assert_eq!(times_2x[0], 0.0);
+        // Interpolated between frame 0 and frame 1 (no cut)
+        assert_eq!(times_2x[1], 0.5);
+        // Source frame 1 pass-through
+        assert_eq!(times_2x[2], 1.0);
+        // Interpolated between frame 1 and frame 2 (cut at 2).
+        // Since t=0.5 >= 0.5, replaced with source frame 2 (2.0)
+        assert_eq!(times_2x[3], 2.0);
+        // Source frame 2 pass-through
+        assert_eq!(times_2x[4], 2.0);
+        // Interpolated between frame 2 and frame 3 (no cut)
+        assert_eq!(times_2x[5], 2.5);
+
+        // Test 4x interpolation: 5 input frames -> 20 output frames
+        let times_4x = build_frame_times(5, 20, &cuts);
+        assert_eq!(times_4x.len(), 20);
+        // Before cut: frame 0 -> 1 smooth interpolation
+        assert_eq!(times_4x[0], 0.0);
+        assert_eq!(times_4x[1], 0.25);
+        assert_eq!(times_4x[2], 0.50);
+        assert_eq!(times_4x[3], 0.75);
+        // Pass-through frame 1
+        assert_eq!(times_4x[4], 1.0);
+        // Across cut boundary between frame 1 and frame 2:
+        // t = 0.25 < 0.5 -> snaps to frame 1 (1.0)
+        assert_eq!(times_4x[5], 1.0);
+        // t = 0.50 >= 0.5 -> snaps to frame 2 (2.0)
+        assert_eq!(times_4x[6], 2.0);
+        // t = 0.75 >= 0.5 -> snaps to frame 2 (2.0)
+        assert_eq!(times_4x[7], 2.0);
+        // Pass-through frame 2
+        assert_eq!(times_4x[8], 2.0);
+        // After cut: frame 2 -> 3 smooth interpolation resumes
+        assert_eq!(times_4x[9], 2.25);
+        assert_eq!(times_4x[10], 2.50);
+        assert_eq!(times_4x[11], 2.75);
+
+        // Verify roundtrip serialization of times with cuts
+        let serialized = serialize_frame_times(&times_4x);
+        let deserialized = deserialize_frame_times(&serialized).expect("deserialize failed");
+        assert_eq!(deserialized, times_4x);
+    }
+
+    #[test]
     fn test_rife_threads_tuning() {
         assert_eq!(rife_threads(16, true, false), "4:2:4");
         assert_eq!(rife_threads(8, true, false), "4:2:4");

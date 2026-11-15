@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -217,6 +218,29 @@ async fn extract_single_frame(ffmpeg: &str, video: &str, frame_idx: u64, out_png
     ]);
     let out = run_cmd_timeout(cmd, Duration::from_secs(15)).await;
     assert!(out.status.success(), "Failed to extract frame {}", frame_idx);
+}
+
+async fn extract_raw_frame(ffmpeg: &str, video: &str, frame_idx: u64) -> Vec<u8> {
+    let mut cmd = tokio::process::Command::new(ffmpeg);
+    cmd.args([
+        "-y",
+        "-v",
+        "error",
+        "-i",
+        video,
+        "-vf",
+        &format!("select=eq(n\\,{})", frame_idx),
+        "-vframes",
+        "1",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-",
+    ]);
+    let out = run_cmd_timeout(cmd, Duration::from_secs(15)).await;
+    assert!(out.status.success(), "Failed to extract raw frame {}", frame_idx);
+    out.stdout
 }
 
 // -----------------------------------------------------------------------------
@@ -1433,6 +1457,32 @@ async fn test_e2e_stream_engine_matches_file_mode() {
     let rate_stream = stream_rate("ffprobe", out_stream.to_str().unwrap()).await;
     assert_eq!(rate_stream, rate_file, "Frame rate must match");
 
+    // 4. Assert pass-through frames bit-exact between stream and file mode
+    for &frame_idx in &[0u64, 24u64, 118u64, 120u64, 238u64] {
+        let b_file = extract_raw_frame("ffmpeg", out_file.to_str().unwrap(), frame_idx).await;
+        let b_stream = extract_raw_frame("ffmpeg", out_stream.to_str().unwrap(), frame_idx).await;
+        assert_eq!(
+            b_stream, b_file,
+            "Pass-through frame {} raw RGB pixels must be bit-exact between stream and file mode",
+            frame_idx
+        );
+    }
+
+    // 5. Assert audio stream exists and its duration is synchronized with video duration
+    let (v_dur_stream, a_dur_stream) = stream_durations("ffprobe", out_stream.to_str().unwrap()).await;
+    assert!(a_dur_stream.is_some(), "Audio stream must exist in stream output");
+    let (_v_dur_file, a_dur_file) = stream_durations("ffprobe", out_file.to_str().unwrap()).await;
+    let a_stream = a_dur_stream.unwrap();
+    let a_file = a_dur_file.unwrap();
+    assert!(
+        (a_stream - a_file).abs() < 0.05,
+        "Audio duration in stream mode ({a_stream}s) must match file mode ({a_file}s) within 50 ms"
+    );
+    assert!(
+        (a_stream - v_dur_stream).abs() < 0.05,
+        "Audio duration ({a_stream}s) must be synchronized with video duration ({v_dur_stream}s) within 50 ms"
+    );
+
     let ssim = ssim_between("ffmpeg", out_file.to_str().unwrap(), out_stream.to_str().unwrap()).await;
     println!("SSIM between file mode and stream mode: {:.6}", ssim);
     assert!(
@@ -1522,5 +1572,56 @@ async fn test_e2e_stream_fallback_on_failure() {
     assert!(out_stream.exists(), "Output file must exist after fallback");
     assert_eq!(res.frames, Some(96));
 
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+#[tokio::test]
+async fn test_fake_rife_stream_pass_through_bit_exact() {
+    let fake_stream = match fake_rife_stream_path() {
+        Some(p) => p,
+        None => return,
+    };
+    let work = unique_temp_dir("fake-stream-direct");
+    let times = build_frame_times(3, 6, &std::collections::HashSet::new());
+    let times_path = work.join("times.dat");
+    tokio::fs::write(&times_path, serialize_frame_times(&times)).await.unwrap();
+
+    let frame_bytes = 64 * 64 * 3;
+    let mut input = Vec::new();
+    for f in 0..3 {
+        input.resize(input.len() + frame_bytes, (f * 70 + 33) as u8);
+    }
+
+    let mut cmd = tokio::process::Command::new("node");
+    cmd.args([
+        fake_stream.to_str().unwrap(),
+        "--stream",
+        times_path.to_str().unwrap(),
+        "-w",
+        "64",
+        "-h",
+        "64",
+    ]);
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn fake-rife-stream");
+    let mut stdin = child.stdin.take().unwrap();
+    let input_clone = input.clone();
+    tokio::spawn(async move {
+        let _ = stdin.write_all(&input_clone).await;
+        let _ = stdin.flush().await;
+    });
+    let mut out_bytes = Vec::new();
+    child.stdout.take().unwrap().read_to_end(&mut out_bytes).await.unwrap();
+    let status = child.wait().await.unwrap();
+    assert!(status.success());
+    assert_eq!(out_bytes.len(), 6 * frame_bytes);
+
+    // In 2x interpolation, output frames 0, 2, 4 are pass-through frames of input 0, 1, 2
+    for f in 0..3 {
+        let in_slice = &input[f * frame_bytes..(f + 1) * frame_bytes];
+        let out_slice = &out_bytes[(f * 2) * frame_bytes..(f * 2 + 1) * frame_bytes];
+        assert_eq!(out_slice, in_slice, "Source frame {f} must pass through bit-exact");
+    }
     let _ = std::fs::remove_dir_all(&work);
 }
