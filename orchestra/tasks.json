@@ -419,6 +419,55 @@
           "warnings"
         ]
       ]
+    },
+    {
+      "id": "T13",
+      "title": "Fps counter overflow, hint placement, onboarding layout, min window size",
+      "brief": "briefs/T13-polish.md",
+      "deps": [
+        "T11",
+        "T12"
+      ],
+      "checks": [
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "install",
+          "--no-audit",
+          "--no-fund"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "build"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "typecheck"
+        ],
+        [
+          "cargo",
+          "test",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml"
+        ],
+        [
+          "cargo",
+          "clippy",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ]
+      ]
     }
   ]
 }
