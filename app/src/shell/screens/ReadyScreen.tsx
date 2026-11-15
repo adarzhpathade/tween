@@ -1,10 +1,20 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { useScreen } from "../ScreenRouter";
 import type { Screen, ProbeInfo, ColourInfo, JobRequest } from "../types";
 import { loadSettingsDefaults } from "../settingsTypes";
+import {
+  MAX_FPS,
+  type FpsRow,
+  formatFps,
+  computeMinCustomFps,
+  computeFpsRows,
+  checkCustomVal,
+  clampCustomVal,
+} from "../fpsStrip";
 
-export type { ColourInfo, ProbeInfo };
+export type { ColourInfo, ProbeInfo, FpsRow };
+export { formatFps };
 
 const THUMBNAIL_CACHE = new Map<string, string[]>();
 
@@ -112,39 +122,57 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const isMock = Boolean(
     import.meta.env.DEV &&
       typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).get("mock") === "1"
+      (new URLSearchParams(window.location.search).get("mock") === "1" ||
+        new URLSearchParams(window.location.search).has("src") ||
+        new URLSearchParams(window.location.search).has("custom") ||
+        new URLSearchParams(window.location.search).has("customval") ||
+        new URLSearchParams(window.location.search).get("state") === "ready")
   );
 
   // The app starts strictly in the empty state (probeInfo = null).
-  // Mock data is only allowed in DEV with explicit ?mock=1 query parameter.
+  // Mock data is only allowed in DEV with explicit mock/preview parameters.
   const [probeInfo, setProbeInfo] = useState<ProbeInfo | null>(() => {
     if (initialProbe) return initialProbe;
-    if (isMock) {
-      return {
-        file: "beach_sunset_24fps.mp4",
-        name: "beach_sunset_24fps.mp4",
-        width: 1920,
-        height: 1080,
-        codec: "H.264",
-        pixFmt: "yuv420p",
-        fpsNum: 24,
-        fpsDen: 1,
-        fps: 24,
-        vfr: false,
-        duration: 42.0,
-        frames: 1008,
-        hasAudio: true,
-        audioCodec: "AAC",
-        colour: {
-          matrix: "bt709",
-          range: "tv",
-          space: "bt709",
-          primaries: "bt709",
-          trc: "bt709",
-          hdr: false,
-        },
-        size: 38 * 1024 * 1024,
-      };
+    if (typeof window !== "undefined") {
+      const searchParams = new URLSearchParams(window.location.search);
+      const isMockOrPreview =
+        (import.meta.env.DEV && searchParams.get("mock") === "1") ||
+        searchParams.has("src") ||
+        searchParams.has("custom") ||
+        searchParams.has("customval") ||
+        (import.meta.env.DEV && searchParams.get("state") === "ready");
+
+      if (isMockOrPreview) {
+        const srcParam = parseFloat(searchParams.get("src") || "24");
+        const mockFps = isNaN(srcParam) || srcParam <= 0 ? 24 : srcParam;
+        const fpsNum = Math.round(mockFps * 1000);
+        const fpsDen = 1000;
+        return {
+          file: `beach_sunset_${Math.round(mockFps)}fps.mp4`,
+          name: `beach_sunset_${Math.round(mockFps)}fps.mp4`,
+          width: 1920,
+          height: 1080,
+          codec: "H.264",
+          pixFmt: "yuv420p",
+          fpsNum: Number.isInteger(mockFps) ? mockFps : fpsNum,
+          fpsDen: Number.isInteger(mockFps) ? 1 : fpsDen,
+          fps: mockFps,
+          vfr: false,
+          duration: 42.0,
+          frames: Math.round(42.0 * mockFps),
+          hasAudio: true,
+          audioCodec: "AAC",
+          colour: {
+            matrix: "bt709",
+            range: "tv",
+            space: "bt709",
+            primaries: "bt709",
+            trc: "bt709",
+            hdr: false,
+          },
+          size: 38 * 1024 * 1024,
+        };
+      }
     }
     return null;
   });
@@ -246,37 +274,55 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   });
 
   // Frame rate strip state
-  type FpsOption = "2×" | "3×" | "4×" | "60" | "120" | "Custom";
-  const [fpsChoice, setFpsChoice] = useState<FpsOption>(() => {
-    const saved = localStorage.getItem("tween_last_fps_choice") as FpsOption | null;
+  const MAXF = MAX_FPS;
+  const minCustomFps = computeMinCustomFps(sourceFps);
+
+  const [selectedChoice, setSelectedChoice] = useState<string>(() => {
+    const saved = localStorage.getItem("tween_last_fps_choice");
     return saved || "2×";
   });
 
-  const [customFps, setCustomFps] = useState<number>(() => {
+  const [customFps, setCustomFps] = useState<number | null>(() => {
     const saved = localStorage.getItem("tween_last_custom_fps");
-    return saved ? parseInt(saved, 10) : 60;
+    return saved ? parseInt(saved, 10) : null;
   });
 
   const [isEditingCustom, setIsEditingCustom] = useState<boolean>(false);
+  const [prevChoice, setPrevChoice] = useState<string>("2×");
+  const [customInputStr, setCustomInputStr] = useState<string>("");
+  const [inputErr, setInputErr] = useState<string | null>(null);
 
-  // Compute target FPS when video is loaded
+  const rvRef = useRef<HTMLDivElement | null>(null);
+  const fpsToRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [railPillStyle, setRailPillStyle] = useState<React.CSSProperties>({});
+
+  // Options adapt to the real source fps
+  const fpsRows = useMemo<FpsRow[]>(() => computeFpsRows(sourceFps, customFps), [sourceFps, customFps]);
+
+  // Keep selection valid as rows adapt
+  useEffect(() => {
+    if (!sourceFps) return;
+    const validRow = fpsRows.find((r) => r.key === selectedChoice && !r.disabled);
+    if (!validRow) {
+      const fallback = fpsRows.find((r) => !r.disabled && !r.isCustom) || fpsRows[0];
+      if (fallback) {
+        setSelectedChoice(fallback.key);
+      }
+    }
+  }, [fpsRows, selectedChoice, sourceFps]);
+
+  // Compute active target FPS
   const targetFps = useMemo(() => {
     if (!sourceFps) return null;
-    switch (fpsChoice) {
-      case "2×":
-        return Math.round(sourceFps * 2);
-      case "3×":
-        return Math.round(sourceFps * 3);
-      case "4×":
-        return Math.round(sourceFps * 4);
-      case "60":
-        return 60;
-      case "120":
-        return 120;
-      case "Custom":
-        return customFps;
+    const activeRow = fpsRows.find((r) => r.key === selectedChoice);
+    if (!activeRow) return sourceFps * 2;
+    if (activeRow.isCustom) {
+      return customFps !== null ? customFps : (90 > sourceFps ? 90 : minCustomFps);
     }
-  }, [fpsChoice, sourceFps, customFps]);
+    return activeRow.fps;
+  }, [selectedChoice, fpsRows, sourceFps, customFps, minCustomFps]);
 
   // Animated counting number for Target FPS
   const [displayFps, setDisplayFps] = useState<number | null>(targetFps);
@@ -284,6 +330,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const prevFpsRef = useRef<number | null>(targetFps);
 
   useEffect(() => {
+    if (isEditingCustom) return;
     const from = prevFpsRef.current;
     const to = targetFps;
     prevFpsRef.current = to;
@@ -293,12 +340,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       return;
     }
 
-    if (from === null) {
-      setDisplayFps(to);
-      return;
-    }
-
-    if (from === to) {
+    if (from === null || from === to) {
       setDisplayFps(to);
       return;
     }
@@ -309,10 +351,12 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     const tick = (now: number) => {
       const p = Math.min(1, (now - t0) / d);
       const e = 1 - Math.pow(1 - p, 3);
-      const val = Math.round(from + (to - from) * e);
+      const val = from + (to - from) * e;
       setDisplayFps(val);
       if (p < 1) {
         animRef.current = requestAnimationFrame(tick);
+      } else {
+        setDisplayFps(to);
       }
     };
 
@@ -320,7 +364,247 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     animRef.current = requestAnimationFrame(tick);
 
     return () => cancelAnimationFrame(animRef.current);
-  }, [targetFps]);
+  }, [targetFps, isEditingCustom]);
+
+  // Validation helper for Custom input
+  const checkVal = useCallback(
+    (str: string) => checkCustomVal(str, sourceFps),
+    [sourceFps]
+  );
+
+  // Custom edit actions
+  const enterEdit = useCallback(
+    (initVal?: number, instant?: boolean) => {
+      if (isEditingCustom) return;
+      setPrevChoice(selectedChoice);
+      setSelectedChoice("Custom");
+      setIsEditingCustom(true);
+
+      const minF = sourceFps ? Math.floor(sourceFps) + 1 : 1;
+      let start = initVal;
+      if (start === undefined && customFps !== null) {
+        start = customFps;
+      }
+      if (start === undefined) {
+        start = 90 > (sourceFps || 0) ? 90 : Math.min(MAXF, Math.max(minF, Math.round((sourceFps || 24) * 1.5)));
+      }
+
+      setCustomInputStr(String(start));
+      const c = checkVal(String(start));
+      setInputErr(c.err || null);
+
+      if (instant) {
+        setDisplayFps(start);
+      }
+
+      requestAnimationFrame(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+          inputRef.current.select();
+        }
+      });
+    },
+    [isEditingCustom, selectedChoice, sourceFps, customFps, checkVal]
+  );
+
+  const cancelEdit = useCallback(() => {
+    if (!isEditingCustom) return;
+    setIsEditingCustom(false);
+    setInputErr(null);
+    setSelectedChoice(prevChoice);
+  }, [isEditingCustom, prevChoice]);
+
+  const commitEdit = useCallback(() => {
+    if (!isEditingCustom) return;
+    const c = checkVal(customInputStr);
+    // Enter applies at once. If invalid, corrected to nearest valid value and applied directly.
+    const clamped = clampCustomVal(c.v, sourceFps, customFps);
+
+    setCustomFps(clamped);
+    setCustomInputStr(String(clamped));
+    setIsEditingCustom(false);
+    setInputErr(null);
+    setSelectedChoice("Custom");
+    setDisplayFps(clamped);
+
+    localStorage.setItem("tween_last_fps_choice", "Custom");
+    localStorage.setItem("tween_last_custom_fps", String(clamped));
+
+    if (inputRef.current) {
+      inputRef.current.blur();
+    }
+
+    // Small spring bounce on #fpsTo
+    if (fpsToRef.current) {
+      try {
+        const cs = getComputedStyle(document.documentElement);
+        const dur = parseFloat(cs.getPropertyValue("--spring-d")) || 400;
+        const easing = cs.getPropertyValue("--spring").trim() || "ease-out";
+        fpsToRef.current.animate([{ transform: "scale(0.93)" }, { transform: "none" }], {
+          duration: dur,
+          easing,
+        });
+      } catch {}
+    }
+  }, [isEditingCustom, checkVal, customInputStr, sourceFps, customFps]);
+
+  const stepCustom = useCallback(
+    (delta: number) => {
+      const c = checkVal(customInputStr);
+      const minF = sourceFps ? Math.floor(sourceFps) + 1 : 1;
+      const base = c.v === undefined ? minF : c.v;
+      const next = Math.min(MAXF, Math.max(minF, base + delta));
+      setCustomInputStr(String(next));
+      const res = checkVal(String(next));
+      setInputErr(res.err || null);
+    },
+    [checkVal, customInputStr, sourceFps]
+  );
+
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const clean = e.target.value.replace(/\D/g, "").slice(0, 3);
+      setCustomInputStr(clean);
+      const res = checkVal(clean);
+      setInputErr(res.err || null);
+    },
+    [checkVal]
+  );
+
+  const handleInputKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        commitEdit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelEdit();
+      } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const dir = e.key === "ArrowUp" ? 1 : -1;
+        stepCustom(dir * (e.shiftKey ? 10 : 1));
+      }
+    },
+    [commitEdit, cancelEdit, stepCustom]
+  );
+
+  const handleInputPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLInputElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const el = inputRef.current;
+      if (!el) return;
+      el.setPointerCapture(e.pointerId);
+
+      const y0 = e.clientY;
+      const c = checkVal(customInputStr);
+      const minF = sourceFps ? Math.floor(sourceFps) + 1 : 1;
+      const v0 = c.v === undefined ? minF : c.v;
+      let moved = false;
+
+      const onMove = (ev: PointerEvent) => {
+        const dy = y0 - ev.clientY;
+        if (Math.abs(dy) > 3) moved = true;
+        if (moved) {
+          const next = Math.min(MAXF, Math.max(minF, v0 + Math.round(dy / 4)));
+          setCustomInputStr(String(next));
+          const res = checkVal(String(next));
+          setInputErr(res.err || null);
+        }
+      };
+
+      const onUp = () => {
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup", onUp);
+        el.removeEventListener("pointercancel", onUp);
+        if (!moved) {
+          el.focus();
+          el.select();
+        }
+      };
+
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
+    },
+    [checkVal, customInputStr, sourceFps]
+  );
+
+  // Click outside cancels custom edit, like Esc
+  useEffect(() => {
+    if (!isEditingCustom) return;
+    const handleDocPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (rvRef.current?.contains(target)) return;
+      const customBtn = buttonRefs.current["Custom"];
+      if (customBtn?.contains(target)) return;
+      cancelEdit();
+    };
+    document.addEventListener("pointerdown", handleDocPointerDown, true);
+    return () => document.removeEventListener("pointerdown", handleDocPointerDown, true);
+  }, [isEditingCustom, cancelEdit]);
+
+  // Mock / preview query parameter support: ?custom=edit|applied&customval=90
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const cm = params.get("custom");
+    const cv = params.get("customval");
+    const customValNum = cv ? parseInt(cv, 10) : undefined;
+
+    if (cm === "edit") {
+      enterEdit(customValNum, true);
+    } else if (cm === "applied") {
+      enterEdit(customValNum, true);
+      const minF = sourceFps ? Math.floor(sourceFps) + 1 : 1;
+      const v = customValNum !== undefined ? Math.min(MAXF, Math.max(minF, customValNum)) : 90;
+      setCustomFps(v);
+      setCustomInputStr(String(v));
+      setIsEditingCustom(false);
+      setInputErr(null);
+      setSelectedChoice("Custom");
+      setDisplayFps(v);
+      localStorage.setItem("tween_last_fps_choice", "Custom");
+      localStorage.setItem("tween_last_custom_fps", String(v));
+    }
+  }, [enterEdit, sourceFps]);
+
+  // Pill highlight for vertical rail
+  const updateRailPill = useCallback(() => {
+    const activeBtn = buttonRefs.current[selectedChoice];
+    if (activeBtn) {
+      setRailPillStyle({
+        transform: `translateY(${activeBtn.offsetTop}px)`,
+        height: `${activeBtn.offsetHeight}px`,
+      });
+    }
+  }, [selectedChoice]);
+
+  useLayoutEffect(() => {
+    updateRailPill();
+  }, [updateRailPill, fpsRows]);
+
+  useEffect(() => {
+    window.addEventListener("resize", updateRailPill);
+    return () => window.removeEventListener("resize", updateRailPill);
+  }, [updateRailPill]);
+
+  const currentGainFrames = useMemo(() => {
+    if (!sourceFps) return null;
+    if (isEditingCustom) {
+      const c = checkVal(customInputStr);
+      if (!c.err && c.v !== undefined) {
+        return Math.max(0, Math.round(c.v - sourceFps));
+      }
+      return null;
+    }
+    if (targetFps !== null) {
+      return Math.max(0, Math.round(targetFps - sourceFps));
+    }
+    return null;
+  }, [isEditingCustom, customInputStr, checkVal, sourceFps, targetFps]);
 
   // Trim editor state
   const [inT, setInT] = useState<number>(0);
@@ -368,8 +652,8 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     localStorage.setItem("tween_last_model", selectedModel);
     localStorage.setItem("tween_last_encoder", selectedEncoder);
     localStorage.setItem("tween_last_quality", String(quality));
-    localStorage.setItem("tween_last_fps_choice", fpsChoice);
-    if (fpsChoice === "Custom") {
+    localStorage.setItem("tween_last_fps_choice", selectedChoice);
+    if (selectedChoice === "Custom" && customFps !== null) {
       localStorage.setItem("tween_last_custom_fps", String(customFps));
     }
 
@@ -381,8 +665,18 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     const normalizedFolder = outputFolder ? outputFolder.replace(/[\\/]+$/, "") : "";
     const outPath = normalizedFolder ? `${normalizedFolder}/${outFileName}` : outFileName;
 
-    const targetMode = fpsChoice === "Custom" || fpsChoice === "60" || fpsChoice === "120" ? "fps" : "multiplier";
-    const targetVal = targetMode === "fps" ? tFps : fpsChoice === "3×" ? 3 : fpsChoice === "4×" ? 4 : 2;
+    const targetMode =
+      selectedChoice === "Custom" || !selectedChoice.includes("×")
+        ? "fps"
+        : "multiplier";
+    const targetVal =
+      targetMode === "fps"
+        ? tFps
+        : selectedChoice === "3×"
+        ? 3
+        : selectedChoice === "4×"
+        ? 4
+        : 2;
 
     const jobRequest: JobRequest = {
       info: probeInfo,
@@ -410,7 +704,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     selectedModel,
     selectedEncoder,
     quality,
-    fpsChoice,
+    selectedChoice,
     customFps,
     targetFps,
     sourceFps,
@@ -886,13 +1180,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     return ticks;
   }, [isLoaded, duration]);
 
-  // Pill highlight for vertical rail
-  const railButtons = ["2×", "3×", "4×", "60", "120", "Custom"] as const;
-  const activeRailIndex = railButtons.indexOf(fpsChoice);
-  const railPillStyle: React.CSSProperties = {
-    top: `${(activeRailIndex / railButtons.length) * 100}%`,
-    height: `${(1 / railButtons.length) * 100}%`,
-  };
 
   // Lane pointer handlers for trim
   const handleLanePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1256,122 +1543,106 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       </section>
 
       {/* Frame Rate Strip (Column 2) */}
-      <aside className="frail nv" data-file={isLoaded ? "loaded" : "none"}>
+      <aside
+        className={`frail nv ${isEditingCustom ? "editing" : ""}`}
+        data-file={isLoaded ? "loaded" : "none"}
+      >
         <span className="lbl">Frame rate</span>
-        <div className="rv">
+        <div
+          ref={rvRef}
+          className={`rv ${isEditingCustom ? "edit" : ""} ${inputErr ? "bad" : ""}`}
+        >
           <div className="fr0">
-            {isLoaded && sourceFps ? `${Math.round(sourceFps)} ` : "— "}
+            <span id="fpsFrom">
+              {isLoaded && sourceFps ? formatFps(sourceFps) : "—"}
+            </span>{" "}
             <i>→</i>
           </div>
-          <div className="fr1" id="fpsTo">
-            {isLoaded && displayFps !== null ? displayFps : "—"}
+          <div className="fr1" id="fpsTo" ref={fpsToRef}>
+            {isLoaded && displayFps !== null ? formatFps(displayFps) : "—"}
           </div>
+          <input
+            ref={inputRef}
+            className="fr1 fin"
+            id="fpsIn"
+            inputMode="numeric"
+            maxLength={3}
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Custom frame rate"
+            value={customInputStr}
+            onChange={handleInputChange}
+            onKeyDown={handleInputKeyDown}
+            onPointerDown={handleInputPointerDown}
+          />
           <small>fps</small>
+          <div className="stp" id="fpsStp">
+            <button
+              type="button"
+              className="up"
+              data-d="1"
+              aria-label="Increase"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                stepCustom(e.shiftKey ? 10 : 1);
+                inputRef.current?.focus();
+              }}
+            />
+            <button
+              type="button"
+              className="dn"
+              data-d="-1"
+              aria-label="Decrease"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                stepCustom(e.shiftKey ? -10 : -1);
+                inputRef.current?.focus();
+              }}
+            />
+          </div>
+          <div className={`fhint ${inputErr ? "bad" : ""}`} id="fpsHint">
+            {inputErr ||
+              `Enter to apply · Esc to cancel · ${minCustomFps}–${MAXF}`}
+          </div>
         </div>
 
         <div className="fseg v" id="fseg">
           <i className="pill" id="pill" style={railPillStyle} />
-          <button
-            type="button"
-            className={fpsChoice === "2×" ? "on" : ""}
-            onClick={() => {
-              setFpsChoice("2×");
-              setIsEditingCustom(false);
-            }}
-          >
-            <b>2×</b>
-            <span>{isLoaded && sourceFps ? `${Math.round(sourceFps * 2)} fps` : "Double"}</span>
-          </button>
-          <button
-            type="button"
-            className={fpsChoice === "3×" ? "on" : ""}
-            onClick={() => {
-              setFpsChoice("3×");
-              setIsEditingCustom(false);
-            }}
-          >
-            <b>3×</b>
-            <span>{isLoaded && sourceFps ? `${Math.round(sourceFps * 3)} fps` : "Triple"}</span>
-          </button>
-          <button
-            type="button"
-            className={fpsChoice === "4×" ? "on" : ""}
-            onClick={() => {
-              setFpsChoice("4×");
-              setIsEditingCustom(false);
-            }}
-          >
-            <b>4×</b>
-            <span>{isLoaded && sourceFps ? `${Math.round(sourceFps * 4)} fps` : "Quad"}</span>
-          </button>
-          <button
-            type="button"
-            className={fpsChoice === "60" ? "on" : ""}
-            onClick={() => {
-              setFpsChoice("60");
-              setIsEditingCustom(false);
-            }}
-          >
-            <b>60</b>
-            <span>fps</span>
-          </button>
-          <button
-            type="button"
-            className={fpsChoice === "120" ? "on" : ""}
-            onClick={() => {
-              setFpsChoice("120");
-              setIsEditingCustom(false);
-            }}
-          >
-            <b>120</b>
-            <span>fps</span>
-          </button>
-          <button
-            type="button"
-            className={fpsChoice === "Custom" ? "on" : ""}
-            onClick={() => {
-              setFpsChoice("Custom");
-              setIsEditingCustom(true);
-            }}
-          >
-            <b>Custom</b>
-            {isEditingCustom ? (
-              <input
-                type="number"
-                className="custom-fps-input"
-                min={isLoaded && sourceFps ? Math.floor(sourceFps) + 1 : 1}
-                max={240}
-                value={customFps}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  if (!isNaN(val)) {
-                    setCustomFps(val);
+          {fpsRows.map((r) => {
+            const isSelected = selectedChoice === r.key;
+            return (
+              <button
+                key={r.key}
+                ref={(el) => {
+                  buttonRefs.current[r.key] = el;
+                }}
+                type="button"
+                className={`${isSelected ? "on" : ""} ${r.disabled ? "dis" : ""}`}
+                aria-disabled={r.disabled ? "true" : undefined}
+                title={r.title}
+                onClick={() => {
+                  if (r.disabled) return;
+                  if (r.isCustom) {
+                    if (!isEditingCustom) enterEdit();
+                  } else {
+                    if (isEditingCustom) cancelEdit();
+                    setSelectedChoice(r.key);
+                    localStorage.setItem("tween_last_fps_choice", r.key);
                   }
                 }}
-                onBlur={() => {
-                  if (isLoaded && sourceFps && customFps <= sourceFps) {
-                    setCustomFps(Math.max(1, Math.min(240, Math.floor(sourceFps) + 1)));
-                  } else if (customFps > 240) {
-                    setCustomFps(240);
-                  } else if (customFps < 1) {
-                    setCustomFps(1);
-                  }
-                  setIsEditingCustom(false);
-                }}
-                autoFocus
-              />
-            ) : (
-              <span>{isLoaded && customFps ? `${customFps} fps` : "fps"}</span>
-            )}
-          </button>
+              >
+                <b>{r.label}</b>
+                <span>{r.sublabel}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="gainv">
           <b id="gainT">
-            {isLoaded && sourceFps && targetFps ? (
+            {isLoaded && sourceFps && currentGainFrames !== null ? (
               <>
-                +{Math.max(0, Math.round(targetFps - sourceFps))} frames
+                +{currentGainFrames} frames
                 <br />
                 every second
               </>
