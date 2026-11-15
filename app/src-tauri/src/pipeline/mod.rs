@@ -25,6 +25,7 @@ pub use types::{
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::Manager;
 use tokio::sync::Mutex;
 
 pub struct JobController {
@@ -58,6 +59,7 @@ pub async fn probe_video(
     app: tauri::AppHandle,
     path: String,
 ) -> Result<ProbeInfo, String> {
+    let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&path));
     let cfg = load_or_default_config(&app);
     probe(&cfg, &path).await
 }
@@ -68,16 +70,32 @@ pub async fn extract_frame(
     path: String,
     time: Option<f64>,
 ) -> Result<String, String> {
+    let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&path));
     let cfg = load_or_default_config(&app);
     probe::extract_frame(&cfg, &path, time).await
 }
 
 #[tauri::command]
-pub async fn pick_video_file() -> Result<Option<String>, String> {
+pub async fn extract_thumbnails(
+    app: tauri::AppHandle,
+    path: String,
+    count: usize,
+    height: u32,
+) -> Result<Vec<String>, String> {
+    let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&path));
+    let cfg = load_or_default_config(&app);
+    probe::extract_thumbnails(&cfg, &path, count, height).await
+}
+
+#[tauri::command]
+pub async fn pick_video_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let file = rfd::AsyncFileDialog::new()
         .add_filter("Video", &["mp4", "mkv", "mov", "avi", "webm", "m4v", "wmv", "flv", "ts", "mts", "m2ts", "gif"])
         .pick_file()
         .await;
+    if let Some(ref f) = file {
+        let _ = app.asset_protocol_scope().allow_file(f.path());
+    }
     Ok(file.map(|f| f.path().to_string_lossy().to_string()))
 }
 
@@ -113,6 +131,14 @@ pub async fn start_job(
         None => load_or_default_config(&app),
     };
 
+    let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&job.info.file));
+    let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&job.output));
+    if let Some(ref tr) = job.temp_root {
+        let _ = app.asset_protocol_scope().allow_directory(std::path::Path::new(tr), true);
+    } else {
+        let _ = app.asset_protocol_scope().allow_directory(std::env::temp_dir(), true);
+    }
+
     let app_clone = app.clone();
     let state_clone = state.inner().0.clone();
 
@@ -124,6 +150,9 @@ pub async fn start_job(
         };
 
         let finished = run_pipeline(cfg, job, emit, cancel).await;
+        if let Some(ref out) = finished.output {
+            let _ = app_clone.asset_protocol_scope().allow_file(std::path::Path::new(out));
+        }
         let _ = app_clone.emit("job-finished", &finished);
 
         let mut lock = state_clone.lock().await;

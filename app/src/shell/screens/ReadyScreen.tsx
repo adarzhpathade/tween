@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { useScreen } from "../ScreenRouter";
 import type { Screen, ProbeInfo, ColourInfo, JobRequest } from "../types";
 
 export type { ColourInfo, ProbeInfo };
+
+const THUMBNAIL_CACHE = new Map<string, string[]>();
 
 export interface GpuDevice {
   id: number;
@@ -106,39 +108,42 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 }) => {
   const { setTitle } = useScreen();
 
+  const isMock = Boolean(
+    import.meta.env.DEV &&
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("mock") === "1"
+  );
+
   // The app starts strictly in the empty state (probeInfo = null).
   // Mock data is only allowed in DEV with explicit ?mock=1 query parameter.
   const [probeInfo, setProbeInfo] = useState<ProbeInfo | null>(() => {
     if (initialProbe) return initialProbe;
-    if (import.meta.env.DEV && typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("mock") === "1") {
-        return {
-          file: "beach_sunset_24fps.mp4",
-          name: "beach_sunset_24fps.mp4",
-          width: 1920,
-          height: 1080,
-          codec: "H.264",
-          pixFmt: "yuv420p",
-          fpsNum: 24,
-          fpsDen: 1,
-          fps: 24,
-          vfr: false,
-          duration: 42.0,
-          frames: 1008,
-          hasAudio: true,
-          audioCodec: "AAC",
-          colour: {
-            matrix: "bt709",
-            range: "tv",
-            space: "bt709",
-            primaries: "bt709",
-            trc: "bt709",
-            hdr: false,
-          },
-          size: 38 * 1024 * 1024,
-        };
-      }
+    if (isMock) {
+      return {
+        file: "beach_sunset_24fps.mp4",
+        name: "beach_sunset_24fps.mp4",
+        width: 1920,
+        height: 1080,
+        codec: "H.264",
+        pixFmt: "yuv420p",
+        fpsNum: 24,
+        fpsDen: 1,
+        fps: 24,
+        vfr: false,
+        duration: 42.0,
+        frames: 1008,
+        hasAudio: true,
+        audioCodec: "AAC",
+        colour: {
+          matrix: "bt709",
+          range: "tv",
+          space: "bt709",
+          primaries: "bt709",
+          trc: "bt709",
+          hdr: false,
+        },
+        size: 38 * 1024 * 1024,
+      };
     }
     return null;
   });
@@ -179,9 +184,36 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     };
   }, [isLoaded, probeInfo?.name, setTitle, onVideoLoaded]);
 
-  // Poster frame preview
+  // Poster frame preview & player state
   const [posterUrl, setPosterUrl] = useState<string | null>(null);
+  const [stageError, setStageError] = useState<string | null>(null);
+  const [codecLimited, setCodecLimited] = useState<boolean>(false);
+  const [thumbnails, setThumbnails] = useState<string[]>([]);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const stepFrameRef = useRef<number>(0);
+
   const [view, setView] = useState<"orig" | "res">("res");
+  const origBtnRef = useRef<HTMLButtonElement | null>(null);
+  const resBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [viewPillStyle, setViewPillStyle] = useState<React.CSSProperties>({});
+
+  const updateViewPill = useCallback(() => {
+    const activeBtn = view === "orig" ? origBtnRef.current : resBtnRef.current;
+    if (activeBtn) {
+      setViewPillStyle({
+        transform: `translateX(${activeBtn.offsetLeft}px)`,
+        width: `${activeBtn.offsetWidth}px`,
+      });
+    }
+  }, [view]);
+
+  useEffect(() => {
+    updateViewPill();
+  }, [updateViewPill]);
+
+  const videoSrc = useMemo(() => {
+    return probeInfo?.file ? convertFileSrc(probeInfo.file) : "";
+  }, [probeInfo?.file]);
 
   // Output folder: starts empty until a video is probed or user picks one
   const [outputFolder, setOutputFolder] = useState<string>("");
@@ -380,14 +412,132 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     onNavigate,
   ]);
 
-  // I/O keyboard shortcuts for trim and Ctrl+Enter for start
+  // Codec error / playability fallback
+  const handleVideoError = useCallback(() => {
+    console.warn("HTML video element error; falling back to poster and frame stepping.");
+    setCodecLimited(true);
+  }, []);
+
+  const handleTimeUpdate = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const cur = v.currentTime;
+    if (outT > inT && cur >= outT) {
+      v.currentTime = inT;
+      setPlayhead(inT);
+      return;
+    }
+    if (cur < inT && outT > inT) {
+      v.currentTime = inT;
+      setPlayhead(inT);
+      return;
+    }
+    setPlayhead(cur);
+  }, [inT, outT]);
+
+  const handleEnded = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = inT;
+    setPlayhead(inT);
+    v.play().catch(() => {});
+  }, [inT]);
+
+  const stepFrame = useCallback(
+    (time: number) => {
+      if (!probeInfo?.file) return;
+      const reqId = ++stepFrameRef.current;
+      invoke<string>("extract_frame", { path: probeInfo.file, time })
+        .then((url) => {
+          if (reqId === stepFrameRef.current && url) {
+            setPosterUrl(url);
+          }
+        })
+        .catch((err) => {
+          console.error("Frame stepping failed:", err);
+        });
+    },
+    [probeInfo?.file]
+  );
+
+  const seekTo = useCallback(
+    (pos: number) => {
+      const minT = 0;
+      const maxT = duration;
+      const target = Math.max(minT, Math.min(maxT, pos));
+      setPlayhead(target);
+      const v = videoRef.current;
+      if (v && !codecLimited) {
+        v.currentTime = target;
+      } else if (codecLimited && probeInfo?.file) {
+        stepFrame(target);
+      }
+    },
+    [duration, codecLimited, probeInfo?.file, stepFrame]
+  );
+
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || codecLimited) return;
+    if (v.paused) {
+      if (outT > inT && (v.currentTime >= outT || v.currentTime < inT)) {
+        v.currentTime = inT;
+        setPlayhead(inT);
+      }
+      v.play().catch((err) => {
+        console.warn("Video play failed:", err);
+      });
+    } else {
+      v.pause();
+    }
+  }, [codecLimited, inT, outT]);
+
+  const stepByFrames = useCallback(
+    (delta: number) => {
+      const v = videoRef.current;
+      if (v && !v.paused) return; // Only step when paused
+      const fps = sourceFps && sourceFps > 0 ? sourceFps : 30;
+      const frameDuration = 1 / fps;
+      setPlayhead((cur) => {
+        const minT = inT;
+        const maxT = outT > inT ? outT : duration;
+        const nextT = Math.max(minT, Math.min(maxT, cur + delta * frameDuration));
+        if (v && !codecLimited) {
+          v.currentTime = nextT;
+        } else if (codecLimited && probeInfo?.file) {
+          stepFrame(nextT);
+        }
+        return nextT;
+      });
+    },
+    [sourceFps, inT, outT, duration, codecLimited, probeInfo?.file, stepFrame]
+  );
+
+  const handleCanvasClick = useCallback(
+    (e: React.MouseEvent) => {
+      if ((e.target as HTMLElement).closest(".vsw")) return;
+      togglePlay();
+    },
+    [togglePlay]
+  );
+
+  // Keyboard shortcuts: Space toggles play/pause, Left/Right steps 1 frame when paused
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
         return;
       }
-      if (e.key === "i" || e.key === "I") {
+      if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        stepByFrames(-1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        stepByFrames(1);
+      } else if (e.key === "i" || e.key === "I") {
         handleSetIn();
       } else if (e.key === "o" || e.key === "O") {
         handleSetOut();
@@ -399,10 +549,12 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleSetIn, handleSetOut, handleStart]);
+  }, [togglePlay, stepByFrames, handleSetIn, handleSetOut, handleStart]);
 
   // Video loader function
   const loadVideo = useCallback(async (filePath: string) => {
+    setStageError(null);
+    setCodecLimited(false);
     try {
       const info = await invoke<ProbeInfo>("probe_video", { path: filePath });
       setProbeInfo(info);
@@ -415,7 +567,30 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         setOutputFolder(filePath);
       }
 
-      // Extract poster frame
+      // Check codec playability preemptively
+      try {
+        const testVideo = document.createElement("video");
+        const c = info.codec.toLowerCase();
+        let mime = "";
+        if (c.includes("h264") || c.includes("avc")) {
+          mime = 'video/mp4; codecs="avc1.42E01E"';
+        } else if (c.includes("hevc") || c.includes("h265")) {
+          mime = 'video/mp4; codecs="hvc1"';
+        } else if (c.includes("vp9")) {
+          mime = 'video/webm; codecs="vp9"';
+        } else if (c.includes("av1")) {
+          mime = 'video/mp4; codecs="av01.0.08M.08"';
+        } else if (c.includes("prores")) {
+          setCodecLimited(true);
+        }
+        if (mime && testVideo.canPlayType(mime) === "") {
+          setCodecLimited(true);
+        }
+      } catch {
+        // Ignore canPlayType error
+      }
+
+      // Extract poster frame (time 0.0)
       try {
         const frameDataUrl = await invoke<string>("extract_frame", {
           path: filePath,
@@ -424,13 +599,60 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         if (frameDataUrl) {
           setPosterUrl(frameDataUrl);
         }
-      } catch {
+      } catch (err) {
+        console.error("Failed to extract poster frame:", err);
         setPosterUrl(null);
       }
     } catch (err) {
       console.error("Failed to probe video:", err);
+      setStageError(String(err));
+      setProbeInfo(null);
     }
   }, []);
+
+  // Thumbnail extraction effect
+  useEffect(() => {
+    if (!probeInfo?.file) {
+      setThumbnails([]);
+      return;
+    }
+    const filePath = probeInfo.file;
+    if (THUMBNAIL_CACHE.has(filePath)) {
+      setThumbnails(THUMBNAIL_CACHE.get(filePath)!);
+      return;
+    }
+
+    setThumbnails([]);
+    const laneEl = laneRef.current;
+    const laneWidth = laneEl ? laneEl.clientWidth : 800;
+    const aspect =
+      probeInfo.width > 0 && probeInfo.height > 0
+        ? probeInfo.width / probeInfo.height
+        : 16 / 9;
+    const thumbWidth = Math.max(30, Math.round(56 * aspect));
+    const count = Math.max(8, Math.min(60, Math.round(laneWidth / thumbWidth)));
+
+    let cancelled = false;
+    invoke<string[]>("extract_thumbnails", {
+      path: filePath,
+      count,
+      height: 56,
+    })
+      .then((thumbs) => {
+        if (cancelled) return;
+        THUMBNAIL_CACHE.set(filePath, thumbs);
+        setThumbnails(thumbs);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("Failed to extract thumbnails:", err);
+        setThumbnails([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [probeInfo?.file, probeInfo?.width, probeInfo?.height]);
 
   // Tauri Drag and Drop listener
   const [isOver, setIsOver] = useState<boolean>(false);
@@ -642,12 +864,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     height: `${(1 / railButtons.length) * 100}%`,
   };
 
-  // View switch pill style
-  const viewPillStyle: React.CSSProperties = {
-    transform: view === "orig" ? "translateX(0)" : "translateX(100%)",
-    width: "50%",
-  };
-
   // Lane pointer handlers for trim
   const handleLanePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isLoaded || duration <= 0) return;
@@ -655,11 +871,11 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     const rect = laneRef.current?.getBoundingClientRect();
     if (!rect) return;
     const pos = Math.min(duration, Math.max(0, ((e.clientX - rect.left) / rect.width) * duration));
-    setPlayhead(pos);
+    seekTo(pos);
 
     const onPointerMove = (ev: PointerEvent) => {
       const curPos = Math.min(duration, Math.max(0, ((ev.clientX - rect.left) / rect.width) * duration));
-      setPlayhead(curPos);
+      seekTo(curPos);
     };
 
     const onPointerUp = () => {
@@ -681,7 +897,13 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     const onPointerMove = (ev: PointerEvent) => {
       const pos = Math.min(outT - MIN_TRIM, Math.max(0, ((ev.clientX - rect.left) / rect.width) * duration));
       setInT(pos);
-      setPlayhead((ph) => Math.max(ph, pos));
+      setPlayhead((ph) => {
+        const nextPh = Math.max(ph, pos);
+        if (videoRef.current && !codecLimited) {
+          videoRef.current.currentTime = nextPh;
+        }
+        return nextPh;
+      });
     };
 
     const onPointerUp = () => {
@@ -703,7 +925,13 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     const onPointerMove = (ev: PointerEvent) => {
       const pos = Math.max(inT + MIN_TRIM, Math.min(duration, ((ev.clientX - rect.left) / rect.width) * duration));
       setOutT(pos);
-      setPlayhead((ph) => Math.min(ph, pos));
+      setPlayhead((ph) => {
+        const nextPh = Math.min(ph, pos);
+        if (videoRef.current && !codecLimited) {
+          videoRef.current.currentTime = nextPh;
+        }
+        return nextPh;
+      });
     };
 
     const onPointerUp = () => {
@@ -737,43 +965,99 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
         {/* Stage */}
         <div className="stage">
-          {isLoaded ? (
-            <div className="canvas nv" id="canvas" data-view={view}>
-              {posterUrl ? (
-                <img
-                  src={posterUrl}
-                  alt="Source poster frame"
+          {stageError ? (
+            <div className="canvas nv" id="canvas">
+              <div className="stage-error">
+                <span>Failed to load video</span>
+                <small>{stageError}</small>
+              </div>
+            </div>
+          ) : isLoaded ? (
+            <div
+              className="canvas nv"
+              id="canvas"
+              data-view={view}
+              onClick={handleCanvasClick}
+              style={{ cursor: "pointer" }}
+            >
+              {isMock ? (
+                <>
+                  <div className="scene orig mock" />
+                  <div className="scene res mock" id="res" />
+                </>
+              ) : (
+                <div className="scene">
+                  {codecLimited ? (
+                    posterUrl ? (
+                      <img
+                        src={posterUrl}
+                        alt="Source frame"
+                        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                      />
+                    ) : null
+                  ) : videoSrc ? (
+                    <video
+                      ref={videoRef}
+                      src={videoSrc}
+                      poster={posterUrl || undefined}
+                      muted
+                      playsInline
+                      loop
+                      onTimeUpdate={handleTimeUpdate}
+                      onEnded={handleEnded}
+                      onError={handleVideoError}
+                      style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                    />
+                  ) : null}
+                </div>
+              )}
+
+              {codecLimited && (
+                <div
+                  className="quiet-warn preview-warning"
                   style={{
                     position: "absolute",
-                    inset: 0,
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "contain",
+                    top: "12px",
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    background: "#0b0b0bd9",
+                    border: "1px solid var(--line2)",
+                    padding: "4px 10px",
+                    borderRadius: "4px",
+                    zIndex: 6,
+                    whiteSpace: "nowrap",
+                    pointerEvents: "none",
                   }}
-                />
-              ) : (
-                <>
-                  <div className="scene orig" />
-                  <div className="scene res" id="res" />
-                </>
+                >
+                  Preview limited for this format; the output is not affected
+                </div>
               )}
-              <div className="vsw v-ready v-done" id="vsw">
+
+              <div className="vsw v-ready v-done" id="vsw" role="tablist">
                 <i className="vpill" id="vpill" style={viewPillStyle} />
                 <button
+                  ref={origBtnRef}
                   type="button"
                   data-v="orig"
                   className={view === "orig" ? "on" : ""}
-                  onClick={() => setView("orig")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setView("orig");
+                  }}
                 >
-                  Original <small>{sourceFps ? `${Math.round(sourceFps)} fps` : "—"}</small>
+                  Original {sourceFps ? <small>{Math.round(sourceFps)} fps</small> : null}
                 </button>
                 <button
+                  ref={resBtnRef}
                   type="button"
                   data-v="res"
                   className={view === "res" ? "on" : ""}
-                  onClick={() => setView("res")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setView("res");
+                  }}
                 >
-                  Interpolated <small id="tagTo">{targetFps ? `${Math.round(targetFps)} fps` : "—"}</small>
+                  Preview after processing
                 </button>
               </div>
             </div>
@@ -791,9 +1075,9 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
                 e.preventDefault();
                 setIsOver(false);
                 const file = e.dataTransfer?.files?.[0];
-                if (file) {
-                  const path = (file as any).path || file.name;
-                  loadVideo(path);
+                const filePath = (file as any)?.path;
+                if (filePath) {
+                  loadVideo(filePath);
                 }
               }}
             >
@@ -878,9 +1162,18 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
             {isLoaded && (
               <>
                 <div className="film" id="film">
-                  {Array.from({ length: 150 }).map((_, i) => (
-                    <i key={i} />
-                  ))}
+                  {isMock ? (
+                    Array.from({ length: 150 }).map((_, i) => <i key={i} />)
+                  ) : (
+                    thumbnails.map((thumb, idx) => (
+                      <img
+                        key={idx}
+                        src={thumb}
+                        alt=""
+                        draggable={false}
+                      />
+                    ))
+                  )}
                 </div>
                 <div className="shade" id="shL" style={{ width: `${(inT / duration) * 100}%` }} />
                 <div

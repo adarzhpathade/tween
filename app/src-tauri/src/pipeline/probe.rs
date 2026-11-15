@@ -254,27 +254,136 @@ pub async fn probe(cfg: &PipelineConfig, file: &str) -> Result<ProbeInfo, String
     })
 }
 
+pub fn split_mjpeg(buf: &[u8]) -> Vec<&[u8]> {
+    let mut images = Vec::new();
+    let mut i = 0;
+    while i + 1 < buf.len() {
+        if buf[i] == 0xFF && buf[i + 1] == 0xD8 {
+            let start = i;
+            i += 2;
+            while i + 1 < buf.len() {
+                if buf[i] == 0xFF && buf[i + 1] == 0xD9 {
+                    images.push(&buf[start..=i + 1]);
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    images
+}
+
+pub async fn extract_thumbnails(
+    cfg: &PipelineConfig,
+    file: &str,
+    count: usize,
+    height: u32,
+) -> Result<Vec<String>, String> {
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let h = if height == 0 { 56 } else { height };
+
+    let dur = match probe(cfg, file).await {
+        Ok(info) if info.duration > 0.0 => info.duration,
+        _ => 1.0,
+    };
+
+    let fps = (count as f64) / dur;
+    let mut cmd = tokio::process::Command::new(&cfg.ffmpeg);
+    cmd.args([
+        "-nostdin",
+        "-y",
+        "-an",
+        "-sn",
+        "-dn",
+        "-i",
+        file,
+        "-vf",
+        &format!("fps={:.4},scale=-2:{}", fps, h),
+        "-frames:v",
+        &count.to_string(),
+        "-pix_fmt",
+        "yuvj420p",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "-q:v",
+        "3",
+        "pipe:1",
+    ]);
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("ffmpeg thumbnails failed to run: {e}"))?;
+
+    if !output.status.success() && output.stdout.is_empty() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ffmpeg extract thumbnails failed: {}", err.trim()));
+    }
+
+    use base64::Engine;
+    let parts = split_mjpeg(&output.stdout);
+    let mut result = Vec::with_capacity(parts.len());
+    for part in parts {
+        let b64 = base64::engine::general_purpose::STANDARD.encode(part);
+        result.push(format!("data:image/jpeg;base64,{}", b64));
+    }
+
+    Ok(result)
+}
+
 pub async fn extract_frame(
     cfg: &PipelineConfig,
     file: &str,
     time: Option<f64>,
 ) -> Result<String, String> {
     let t = time.unwrap_or(0.0);
-    let time_str = format!("{:.3}", t);
     let mut cmd = tokio::process::Command::new(&cfg.ffmpeg);
-    cmd.args([
-        "-ss",
-        &time_str,
-        "-i",
-        file,
-        "-frames:v",
-        "1",
-        "-f",
-        "image2pipe",
-        "-vcodec",
-        "mjpeg",
-        "pipe:1",
+
+    let mut args: Vec<String> = vec![
+        "-nostdin".into(),
+        "-y".into(),
+    ];
+
+    if t > 0.0 {
+        args.push("-ss".into());
+        args.push(format!("{:.3}", t));
+    }
+
+    args.extend([
+        "-i".into(),
+        file.into(),
+        "-map".into(),
+        "0:v:0".into(),
+        "-frames:v".into(),
+        "1".into(),
+        "-an".into(),
+        "-sn".into(),
+        "-dn".into(),
+        "-pix_fmt".into(),
+        "yuvj420p".into(),
+        "-f".into(),
+        "image2pipe".into(),
+        "-vcodec".into(),
+        "mjpeg".into(),
+        "-q:v".into(),
+        "2".into(),
+        "pipe:1".into(),
     ]);
+
+    cmd.args(&args);
 
     #[cfg(target_os = "windows")]
     {
@@ -288,17 +397,35 @@ pub async fn extract_frame(
         output.stdout
     } else {
         let mut fb = tokio::process::Command::new(&cfg.ffmpeg);
-        fb.args([
-            "-i",
-            file,
-            "-frames:v",
-            "1",
-            "-f",
-            "image2pipe",
-            "-vcodec",
-            "mjpeg",
-            "pipe:1",
+        let mut fb_args: Vec<String> = vec![
+            "-nostdin".into(),
+            "-y".into(),
+            "-i".into(),
+            file.into(),
+        ];
+        if t > 0.0 {
+            fb_args.push("-ss".into());
+            fb_args.push(format!("{:.3}", t));
+        }
+        fb_args.extend([
+            "-map".into(),
+            "0:v:0".into(),
+            "-frames:v".into(),
+            "1".into(),
+            "-an".into(),
+            "-sn".into(),
+            "-dn".into(),
+            "-pix_fmt".into(),
+            "yuvj420p".into(),
+            "-f".into(),
+            "image2pipe".into(),
+            "-vcodec".into(),
+            "mjpeg".into(),
+            "-q:v".into(),
+            "2".into(),
+            "pipe:1".into(),
         ]);
+        fb.args(&fb_args);
         #[cfg(target_os = "windows")]
         {
             const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -306,8 +433,14 @@ pub async fn extract_frame(
         }
         let fb_out = fb.output().await.map_err(|e| format!("ffmpeg fallback failed: {e}"))?;
         if !fb_out.status.success() || fb_out.stdout.is_empty() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("ffmpeg extract frame failed: {}", err.trim()));
+            let err = String::from_utf8_lossy(&fb_out.stderr);
+            let first_err = String::from_utf8_lossy(&output.stderr);
+            let combined = if !err.trim().is_empty() {
+                err.trim().to_string()
+            } else {
+                first_err.trim().to_string()
+            };
+            return Err(format!("ffmpeg extract frame failed: {}", combined));
         }
         fb_out.stdout
     };
@@ -316,4 +449,102 @@ pub async fn extract_frame(
     let b64 = base64::engine::general_purpose::STANDARD.encode(&stdout);
     Ok(format!("data:image/jpeg;base64,{}", b64))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_extract_frame_bouncing_ball() {
+        let has_ffmpeg = std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !has_ffmpeg {
+            eprintln!("SKIPPING test_extract_frame_bouncing_ball: ffmpeg not on PATH");
+            return;
+        }
+
+        let work = std::env::temp_dir().join("tween-test-extract");
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).unwrap();
+
+        let clip = work.join("Bouncing Ball.mp4");
+        let status = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=1920x1080:rate=60",
+                "-t",
+                "2",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                "libx264",
+                clip.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let cfg = PipelineConfig::default();
+        let res = extract_frame(&cfg, clip.to_str().unwrap(), Some(0.0)).await;
+        eprintln!("extract_frame result ok? {}", res.is_ok());
+        if let Err(e) = &res {
+            eprintln!("extract_frame error: {}", e);
+        }
+        let _ = std::fs::remove_dir_all(&work);
+        assert!(res.is_ok(), "extract_frame failed: {:?}", res.err());
+    }
+
+    #[tokio::test]
+    async fn test_extract_thumbnails() {
+        let has_ffmpeg = std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !has_ffmpeg {
+            return;
+        }
+
+        let work = std::env::temp_dir().join("tween-test-thumbs");
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).unwrap();
+
+        let clip = work.join("test_clip.mp4");
+        let status = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=30",
+                "-t",
+                "3",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                "libx264",
+                clip.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let cfg = PipelineConfig::default();
+        let res = extract_thumbnails(&cfg, clip.to_str().unwrap(), 5, 56).await;
+        assert!(res.is_ok(), "thumbnails failed: {:?}", res.err());
+        let thumbs = res.unwrap();
+        assert_eq!(thumbs.len(), 5);
+        for t in &thumbs {
+            assert!(t.starts_with("data:image/jpeg;base64,"));
+        }
+        let _ = std::fs::remove_dir_all(&work);
+    }
+}
+
 

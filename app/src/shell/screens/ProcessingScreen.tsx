@@ -44,7 +44,7 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
   );
 
   const [stats, setStats] = useState<SystemStats | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [displayedUrl, setDisplayedUrl] = useState<string | null>(null);
   const lastPreviewUpdateRef = useRef<number>(0);
   const [elapsedSec, setElapsedSec] = useState<number>(0);
   const startTimeRef = useRef<number>(Date.now());
@@ -91,9 +91,19 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
       lastPreviewUpdateRef.current = now;
       try {
         const converted = convertFileSrc(jobProgress.preview);
-        setPreviewUrl(`${converted}?t=${now}`);
+        const urlWithTs = `${converted}?t=${now}`;
+        const img = new Image();
+        img.onload = () => {
+          setDisplayedUrl(urlWithTs);
+        };
+        img.src = urlWithTs;
       } catch {
-        setPreviewUrl(jobProgress.preview);
+        const raw = jobProgress.preview;
+        const img = new Image();
+        img.onload = () => {
+          setDisplayedUrl(raw);
+        };
+        img.src = raw;
       }
     }
   }, [jobProgress?.preview]);
@@ -238,10 +248,10 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
 
         <div className="stage">
           <div className="canvas" id="canvas">
-            <div className="scene">
-              {previewUrl ? (
+            <div className={`scene ${isMock ? "mock" : ""}`}>
+              {displayedUrl ? (
                 <img
-                  src={previewUrl}
+                  src={displayedUrl}
                   alt="Live interpolation preview"
                   style={{ width: "100%", height: "100%", objectFit: "contain" }}
                 />
