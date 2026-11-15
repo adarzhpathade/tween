@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { AnimatePresence } from "motion/react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -14,6 +14,7 @@ import { SCREEN_TITLES } from "./types";
 import { MainGrid } from "./MainGrid";
 import { TitleBar } from "./TitleBar";
 import { StatusBar } from "./StatusBar";
+import { SettingsSheet } from "./SettingsSheet";
 import { OnboardingScreen } from "./screens/OnboardingScreen";
 import { ReadyScreen } from "./screens/ReadyScreen";
 import { ProcessingScreen } from "./screens/ProcessingScreen";
@@ -151,6 +152,20 @@ export const ScreenRouter: React.FC = () => {
   );
 
   const [setupCfg, setSetupCfg] = useState<any>(null);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return /settings=open/.test(window.location.search);
+    }
+    return false;
+  });
+
+  const handleToggleSettings = useCallback(() => {
+    setSettingsOpen((prev) => !prev);
+  }, []);
+
+  const handleCloseSettings = useCallback(() => {
+    setSettingsOpen(false);
+  }, []);
   const [videoLoaded, setVideoLoaded] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -361,7 +376,12 @@ export const ScreenRouter: React.FC = () => {
       data-state={screen}
       data-file={screen === "ready" ? (videoLoaded || isMockDev ? "loaded" : "none") : undefined}
     >
-      <TitleBar title={displayTitle} brand="Tween" />
+      <TitleBar
+        title={displayTitle}
+        brand="Tween"
+        settingsOpen={settingsOpen}
+        onToggleSettings={handleToggleSettings}
+      />
       <AnimatePresence mode="wait">
         <MainGrid key={screen} screen={screen}>
           {renderScreen()}
@@ -372,6 +392,23 @@ export const ScreenRouter: React.FC = () => {
         gpu={gpuLabel}
         engine={engineLabel}
         status={statusLabel}
+      />
+
+      {/* Settings sheet */}
+      <SettingsSheet
+        isOpen={settingsOpen}
+        onClose={handleCloseSettings}
+        isJobRunning={screen === "processing"}
+        lastJobError={jobError}
+        knownVideoNames={
+          [
+            activeProbe?.file,
+            activeProbe?.name,
+            activeJob?.output,
+          ].filter(Boolean) as string[]
+        }
+        setupConfig={setupCfg}
+        onSetupUpdated={setSetupCfg}
       />
 
       {/* Developer-only switcher behind import.meta.env.DEV && ?mock=1 */}

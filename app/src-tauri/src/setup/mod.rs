@@ -1559,6 +1559,7 @@ pub fn is_allowed_driver_url(url: &str) -> bool {
         || host_lower == "intel.com"
         || host_lower == "www.intel.com"
         || host_lower.ends_with(".intel.com")
+        || host_lower == "adarzh.tech"
 }
 
 #[tauri::command]
@@ -1603,9 +1604,15 @@ mod tests {
         assert!(is_allowed_driver_url("https://www.intel.com/content/www/us/en/support/detect.html"));
         assert!(is_allowed_driver_url("https://nvidia.com/drivers"));
         assert!(is_allowed_driver_url("https://downloadcenter.intel.com/"));
+        assert!(is_allowed_driver_url("https://adarzh.tech"));
+        assert!(is_allowed_driver_url("https://adarzh.tech/"));
 
         assert!(!is_allowed_driver_url("http://www.nvidia.com/Download/index.aspx"));
+        assert!(!is_allowed_driver_url("http://adarzh.tech"));
+        assert!(!is_allowed_driver_url("https://sub.adarzh.tech"));
+        assert!(!is_allowed_driver_url("https://adarzh.tech.attacker.com"));
         assert!(!is_allowed_driver_url("https://evil.com/www.nvidia.com"));
+        assert!(!is_allowed_driver_url("https://evil.com/https://adarzh.tech"));
         assert!(!is_allowed_driver_url("https://nvidia.com.attacker.com/"));
         assert!(!is_allowed_driver_url("https://user:pass@www.nvidia.com/"));
         assert!(!is_allowed_driver_url("https://www.nvidia.com:8080/"));

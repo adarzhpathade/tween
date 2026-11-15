@@ -1,4 +1,68 @@
 use std::path::Path;
+use serde::{Deserialize, Serialize};
+use crate::pipeline::PipelineState;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageInfo {
+    pub temp_dir: String,
+    pub free_bytes: u64,
+    pub in_use_bytes: u64,
+}
+
+pub fn dir_size(path: &Path) -> u64 {
+    let mut total = 0;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_dir() {
+                    total += dir_size(&entry.path());
+                } else {
+                    total += meta.len();
+                }
+            }
+        }
+    }
+    total
+}
+
+pub fn calculate_tween_temp_size(root: &Path) -> u64 {
+    let mut total = 0;
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string() {
+                if name.starts_with("tween-") {
+                    let p = entry.path();
+                    if let Ok(meta) = entry.metadata() {
+                        if meta.is_dir() {
+                            total += dir_size(&p);
+                        } else {
+                            total += meta.len();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    total
+}
+
+pub fn delete_tween_temp_entries(root: &Path) {
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string() {
+                if name.starts_with("tween-") {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        let _ = std::fs::remove_dir_all(&p);
+                    } else if p.is_file() {
+                        let _ = std::fs::remove_file(&p);
+                    }
+                }
+            }
+        }
+    }
+}
 
 pub fn clean_temp(root: Option<&Path>) {
     let tmp = match root {
@@ -16,5 +80,64 @@ pub fn clean_temp(root: Option<&Path>) {
                 }
             }
         }
+    }
+}
+
+#[tauri::command]
+pub fn storage_info() -> Result<StorageInfo, String> {
+    let temp_dir_path = std::env::temp_dir();
+    let free = crate::setup::free_disk_space(&temp_dir_path).unwrap_or(0);
+    let in_use = calculate_tween_temp_size(&temp_dir_path);
+    Ok(StorageInfo {
+        temp_dir: temp_dir_path.to_string_lossy().to_string(),
+        free_bytes: free,
+        in_use_bytes: in_use,
+    })
+}
+
+#[tauri::command]
+pub async fn clear_temp(state: tauri::State<'_, PipelineState>) -> Result<(), String> {
+    let lock = state.inner().0.lock().await;
+    if lock.is_some() {
+        return Err("Cannot clear temporary files while a job is running".into());
+    }
+    let temp_dir = std::env::temp_dir();
+    delete_tween_temp_entries(&temp_dir);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_storage_helpers() {
+        let test_root = std::env::temp_dir().join(format!("tween-test-storage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&test_root);
+        std::fs::create_dir_all(&test_root).unwrap();
+
+        let tween_dir = test_root.join("tween-job-123");
+        std::fs::create_dir_all(&tween_dir).unwrap();
+        std::fs::write(tween_dir.join("frame.png"), vec![0u8; 1024]).unwrap();
+
+        let tween_selftest = test_root.join("tween-selftest");
+        std::fs::create_dir_all(&tween_selftest).unwrap();
+        std::fs::write(tween_selftest.join("test.bin"), vec![0u8; 2048]).unwrap();
+
+        let other_dir = test_root.join("other-folder");
+        std::fs::create_dir_all(&other_dir).unwrap();
+        std::fs::write(other_dir.join("file.txt"), vec![0u8; 4096]).unwrap();
+
+        let in_use = calculate_tween_temp_size(&test_root);
+        assert_eq!(in_use, 1024 + 2048);
+
+        delete_tween_temp_entries(&test_root);
+
+        assert!(!tween_dir.exists());
+        assert!(!tween_selftest.exists());
+        assert!(other_dir.exists());
+        assert_eq!(calculate_tween_temp_size(&test_root), 0);
+
+        let _ = std::fs::remove_dir_all(&test_root);
     }
 }

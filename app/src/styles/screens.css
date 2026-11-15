@@ -1122,6 +1122,12 @@
   color: var(--text);
 }
 
+.welcome[data-step="1"] .skip,
+.welcome[data-step="2"] .skip {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .ln {
   display: block;
   overflow: hidden;
@@ -1804,4 +1810,372 @@
   gap: 8px;
   padding: 4px 0;
 }
+
+/* ---------- v7: settings button + sheet ---------- */
+.wc #setBtn.on,
+.wc button#setBtn.on {
+  color: var(--acc);
+}
+
+.setroot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 36px;
+  bottom: 0;
+  z-index: 60;
+  overflow: hidden;
+}
+
+.setroot[hidden] {
+  display: none;
+}
+
+.setov {
+  position: absolute;
+  inset: 0;
+  background: #000a;
+  backdrop-filter: blur(2px);
+}
+
+.sheet {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 408px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--line2);
+  box-shadow: -24px 0 60px -20px #000c;
+  z-index: 2;
+}
+
+.sh-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 36px;
+  padding-left: 24px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.sh-x {
+  width: 42px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  color: var(--mut);
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.sh-x:hover {
+  background: #ffffff12;
+  color: var(--text);
+}
+
+.sh-nav {
+  display: flex;
+  gap: 22px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.sh-nav button {
+  position: relative;
+  padding: 12px 0 11px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  transition: color .2s;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.sh-nav button:hover {
+  color: var(--text);
+}
+
+.sh-nav button.on {
+  color: var(--text);
+}
+
+.sh-nav button.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--acc);
+}
+
+.sh-scroll {
+  flex: 1;
+  overflow: auto;
+  scrollbar-width: none;
+  position: relative;
+}
+
+.sheet .grp {
+  padding: 20px 24px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sheet .grp:last-of-type {
+  border-bottom: none;
+}
+
+.sheet .grp > .lbl em {
+  font-style: normal;
+  color: var(--acc);
+  letter-spacing: .1em;
+  float: right;
+  font-size: 10px;
+}
+
+.sck {
+  display: grid;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.sck .ck {
+  padding: 11px 14px;
+  grid-template-columns: 20px 1fr;
+}
+
+.sck .ck b {
+  font-size: 12.5px;
+}
+
+.sck .ck span {
+  font-size: 10px;
+}
+
+.sh-btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.sh-btns .chipb.ok {
+  border-color: var(--acc);
+  color: var(--acc);
+}
+
+.sh-f {
+  margin-bottom: 16px;
+}
+
+.sh-f > span {
+  display: block;
+  font-size: 12px;
+  color: var(--mut);
+  margin-bottom: 8px;
+}
+
+.sheet .opt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sheet .model {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  transition: border-color .2s, background .2s;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sheet .model:hover {
+  border-color: var(--line2);
+  background: #ffffff05;
+}
+
+.sheet .model.on {
+  border-color: var(--acc);
+  background: #a9b79a12;
+}
+
+.sheet .model .mtx {
+  flex: 1;
+  min-width: 0;
+}
+
+.sheet .model .mtx b {
+  display: block;
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.sheet .model small {
+  display: block;
+  font-size: 11px;
+  color: var(--dim);
+  margin-top: 2px;
+}
+
+.sheet .model em {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.sheet .model.on em {
+  color: var(--acc);
+}
+
+.sheet .model .rd {
+  display: none;
+}
+
+.sheet .seg button {
+  padding: 8px 0;
+}
+
+.pickb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  transition: border-color .2s, background .2s;
+  cursor: pointer;
+}
+
+.pickb:hover {
+  border-color: var(--line2);
+  background: #ffffff05;
+}
+
+.pickb div {
+  flex: 1;
+  min-width: 0;
+}
+
+.pickb b {
+  display: block;
+  font-weight: 500;
+  font-size: 12.5px;
+}
+
+.pickb small {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  margin-top: 3px;
+}
+
+.pickb span {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.sheet .row {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sheet .row:last-of-type {
+  border-bottom: 0;
+}
+
+.ab-name {
+  font-family: var(--mono);
+  font-weight: 300;
+  font-size: 30px;
+  letter-spacing: -.04em;
+  margin: 2px 0 10px;
+  color: var(--text);
+}
+
+.lnk {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text);
+  border-bottom: 1px solid var(--line2);
+  padding-bottom: 1px;
+  transition: color .2s, border-color .2s;
+  cursor: pointer;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  text-decoration: none;
+}
+
+.lnk:hover {
+  color: var(--acc);
+  border-color: var(--acc);
+}
+
+.notices {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--spring-d, 400ms) var(--spring, ease);
+}
+
+.notices > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.notices.open {
+  grid-template-rows: 1fr;
+}
+
+.nl {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--mut);
+}
+
+.nl:first-child {
+  margin-top: 4px;
+}
+
+.nl b {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.nl span {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
 

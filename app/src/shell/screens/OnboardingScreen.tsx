@@ -564,9 +564,9 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   const hasMissing = cards.some((c) => c.state === "missing");
   const hasError = cards.some((c) => c.state === "error");
 
-  // Keep Continue enabled once real setup returns ok: true or all passed
+  // In mock dev mode without Tauri, set setupOk when all 6 cards pass
   useEffect(() => {
-    if (passedCount === 6) {
+    if (!isTauri() && passedCount === 6) {
       setSetupOk(true);
     }
   }, [passedCount]);
@@ -604,7 +604,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   };
 
   const handleSkip = () => {
-    handleFinish();
+    // Skip never skips setup: it jumps to the system check, which still runs
+    setStep(1);
   };
 
   const handleFinish = () => {
@@ -646,10 +647,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
     setScratchFolder(list[nextIdx]);
   };
 
-  // Next button disable logic matching mock
+  // Continue or Finish stays disabled until setup_run returns ok
   const isNextDisabled =
-    (step === 1 && !setupOk && passedCount < 6) ||
-    (step === 2 && !readAllowed);
+    (step === 1 && !setupOk) ||
+    (step === 2 && (!setupOk || !readAllowed));
 
   // Compute card details based on selected compute device
   const displayCards = cards.map((c) => {
@@ -678,7 +679,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
             <button
               type="button"
               className="skip"
+              id="skip"
               onClick={handleSkip}
+              style={{
+                visibility: step === 0 ? "visible" : "hidden",
+                pointerEvents: step === 0 ? "auto" : "none",
+              }}
             >
               Skip
             </button>

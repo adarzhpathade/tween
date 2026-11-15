@@ -7,3 +7,5 @@ export * from "./screens/OnboardingScreen";
 export * from "./screens/ReadyScreen";
 export * from "./screens/ProcessingScreen";
 export * from "./screens/DoneScreen";
+export * from "./SettingsSheet";
+export * from "./settingsTypes";
