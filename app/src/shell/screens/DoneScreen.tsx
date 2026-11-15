@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import type { Screen, ProbeInfo, JobRequest, JobFinished } from "../types";
 import { loadSettingsDefaults } from "../settingsTypes";
 
@@ -200,8 +200,11 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
       ? resFile.replace(/[\\/][^\\/]+$/, "")
       : jobRequest?.output
       ? jobRequest.output.replace(/[\\/][^\\/]+$/, "")
-      : loadSettingsDefaults().outputFolder ||
-        (isMock ? "C:\\Users\\You\\Videos\\Tween" : "—")) || "—";
+      : isTauri() && loadSettingsDefaults().outputFolder
+      ? loadSettingsDefaults().outputFolder
+      : isMock
+      ? "C:\\Users\\You\\Videos\\Tween"
+      : "—") || "—";
 
   const sizeText =
     jobFinished?.outSize != null

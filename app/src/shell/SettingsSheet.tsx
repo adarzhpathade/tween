@@ -9,6 +9,7 @@ import {
   loadSettingsDefaults,
   saveSettingsDefaults,
   fetchDefaultFolders,
+  isMockDev,
 } from "./settingsTypes";
 
 export interface SettingsSheetProps {
@@ -195,6 +196,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
     }
     if (!defaults.outputFolder) {
       fetchDefaultFolders().then((f) => {
+        if (!f?.output) return;
         setDefaults((prev) => {
           if (prev.outputFolder) return prev;
           const updated = { ...prev, outputFolder: f.output };
@@ -211,7 +213,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
       invoke<StorageInfo>("storage_info")
         .then((info) => setStorageInfo(info))
         .catch((err) => console.warn("storage_info error:", err));
-    } else {
+    } else if (isMockDev()) {
       // Mock storage info for browser preview
       setStorageInfo({
         tempDir: "C:\\Users\\You\\AppData\\Local\\Temp\\tween",
@@ -551,7 +553,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
       } catch (err) {
         console.warn("pick_output_folder error:", err);
       }
-    } else {
+    } else if (isMockDev()) {
       // Mock toggle
       const mockList = [
         "C:\\Users\\You\\Videos\\Tween",

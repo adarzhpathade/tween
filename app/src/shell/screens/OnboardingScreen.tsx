@@ -8,6 +8,7 @@ import {
   loadSettingsDefaults,
   saveSettingsDefaults,
   fetchDefaultFolders,
+  isMockDev,
 } from "../settingsTypes";
 
 export interface OnboardingScreenProps {
@@ -82,15 +83,21 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   // Load real default folders
   useEffect(() => {
     fetchDefaultFolders().then((f) => {
+      if (!f) return;
       setOutputFolder((prev) => {
         if (prev && prev !== "—") return prev;
-        const existing = loadSettingsDefaults();
-        if (!existing.outputFolder) {
-          saveSettingsDefaults({ ...existing, outputFolder: f.output });
+        if (f.output) {
+          const existing = loadSettingsDefaults();
+          if (!existing.outputFolder) {
+            saveSettingsDefaults({ ...existing, outputFolder: f.output });
+          }
+          return f.output;
         }
-        return f.output;
+        return prev;
       });
-      setScratchFolder(f.temp);
+      if (f.temp) {
+        setScratchFolder(f.temp);
+      }
     });
   }, []);
 
@@ -670,7 +677,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
       } catch (err) {
         console.warn("pick_output_folder error:", err);
       }
-    } else {
+    } else if (isMockDev()) {
       const list = [
         "C:\\Users\\You\\Videos\\Tween",
         "C:\\Users\\You\\Videos\\Exports",
@@ -697,7 +704,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
       } catch (err) {
         console.warn("pick_output_folder error:", err);
       }
-    } else {
+    } else if (isMockDev()) {
       const list = [
         "C:\\Users\\You\\AppData\\Local\\Temp\\tween",
         "C:\\Scratch",
