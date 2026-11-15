@@ -10,6 +10,7 @@ pub struct ZipEntry {
     pub csize: u64,
     pub size: u64,
     pub offset: u64,
+    pub mode: u32,
 }
 
 pub struct RemoteZip {
@@ -252,17 +253,25 @@ impl RemoteZip {
             if read_u32_le(&cd, p)? != 0x02014b50 {
                 return Err("Corrupt central directory".to_string());
             }
+            let ver_made_by = read_u16_le(&cd, p + 4)?;
             let method = read_u16_le(&cd, p + 10)?;
             let csize = read_u32_le(&cd, p + 20)? as u64;
             let size = read_u32_le(&cd, p + 24)? as u64;
             let name_len = read_u16_le(&cd, p + 28)? as usize;
             let extra_len = read_u16_le(&cd, p + 30)? as usize;
             let comment_len = read_u16_le(&cd, p + 32)? as usize;
+            let ext_attr = read_u32_le(&cd, p + 38)?;
             let offset = read_u32_le(&cd, p + 42)? as u64;
 
             if p + 46 + name_len > cd.len() {
                 return Err("Corrupt central directory (name length exceeds buffer)".to_string());
             }
+
+            let mode = if (ver_made_by >> 8) == 3 {
+                (ext_attr >> 16) as u32
+            } else {
+                0
+            };
 
             let name = String::from_utf8_lossy(&cd[p + 46..p + 46 + name_len]).replace('\\', "/");
             let mut entry = ZipEntry {
@@ -271,6 +280,7 @@ impl RemoteZip {
                 csize,
                 size,
                 offset,
+                mode,
             };
 
             if extra_len > 0 && p + 46 + name_len + extra_len <= cd.len() {
@@ -362,6 +372,18 @@ impl RemoteZip {
         tokio::fs::rename(&part_path, dest)
             .await
             .map_err(|e| format!("Failed to rename {part_path} to {}: {e}", dest.display()))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let file_name = dest.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let is_known_exe = file_name == "ffmpeg"
+                || file_name == "ffprobe"
+                || file_name == "rife-ncnn-vulkan";
+            if (entry.mode & 0o111) != 0 || is_known_exe {
+                let _ = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755));
+            }
+        }
 
         Ok(())
     }

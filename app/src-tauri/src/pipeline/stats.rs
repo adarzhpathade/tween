@@ -170,31 +170,42 @@ pub fn show_in_folder(path: String) -> Result<(), String> {
             return Err(format!("Folder not found: {path}"));
         }
         cmd.creation_flags(0x08000000);
-        let _ = cmd.spawn();
+        cmd.spawn().map_err(|e| format!("Failed to run explorer: {e}"))?;
     }
     #[cfg(target_os = "macos")]
     {
         let mut cmd = std::process::Command::new("open");
-        if p.is_file() {
-            cmd.args(["-R", &p.display().to_string()]);
-        } else if p.is_dir() {
-            cmd.arg(p.display().to_string());
-        } else if let Some(parent) = p.parent() {
-            cmd.arg(parent.display().to_string());
+        if p.exists() {
+            if p.is_file() {
+                cmd.arg("-R").arg(p);
+            } else {
+                cmd.arg(p);
+            }
+        } else if let Some(parent) = p.parent().filter(|q| q.exists()) {
+            cmd.arg(parent);
         } else {
-            cmd.arg(&path);
+            return Err(format!("Folder not found: {path}"));
         }
-        let _ = cmd.spawn();
+        cmd.spawn().map_err(|e| format!("Failed to run open: {e}"))?;
     }
     #[cfg(target_os = "linux")]
     {
-        let mut cmd = std::process::Command::new("xdg-open");
-        if p.is_file() {
-            cmd.arg(p.parent().unwrap_or(p).display().to_string());
+        let target = if p.is_dir() && p.exists() {
+            p
+        } else if let Some(parent) = p.parent().filter(|q| q.exists()) {
+            parent
+        } else if p.exists() {
+            p
         } else {
-            cmd.arg(p.display().to_string());
-        }
-        let _ = cmd.spawn();
+            return Err(format!("Folder not found: {path}"));
+        };
+        let mut cmd = std::process::Command::new("xdg-open");
+        cmd.arg(target);
+        cmd.spawn().map_err(|e| format!("Failed to run xdg-open: {e}"))?;
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        return Err(format!("Unsupported platform for show in folder: {path}"));
     }
     Ok(())
 }

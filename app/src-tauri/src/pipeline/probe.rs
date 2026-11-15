@@ -462,6 +462,9 @@ mod tests {
             .map(|o| o.status.success())
             .unwrap_or(false);
         if !has_ffmpeg {
+            if std::env::var("TWEEN_REQUIRE_E2E").map(|v| v == "1").unwrap_or(false) {
+                panic!("TWEEN_REQUIRE_E2E is set, but ffmpeg was not found on PATH");
+            }
             eprintln!("SKIPPING test_extract_frame_bouncing_ball: ffmpeg not on PATH");
             return;
         }
@@ -508,6 +511,10 @@ mod tests {
             .map(|o| o.status.success())
             .unwrap_or(false);
         if !has_ffmpeg {
+            if std::env::var("TWEEN_REQUIRE_E2E").map(|v| v == "1").unwrap_or(false) {
+                panic!("TWEEN_REQUIRE_E2E is set, but ffmpeg was not found on PATH");
+            }
+            eprintln!("SKIPPING test_extract_thumbnails: ffmpeg not on PATH");
             return;
         }
 

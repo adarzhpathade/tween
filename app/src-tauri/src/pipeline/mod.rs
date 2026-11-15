@@ -483,6 +483,9 @@ mod tests {
             .unwrap_or(false);
 
         if !has_ffmpeg || !has_node {
+            if std::env::var("TWEEN_REQUIRE_E2E").map(|v| v == "1").unwrap_or(false) {
+                panic!("TWEEN_REQUIRE_E2E is set, but ffmpeg or node was not found on PATH (has_ffmpeg={has_ffmpeg}, has_node={has_node})");
+            }
             eprintln!("SKIPPING test_e2e_fake_rife: ffmpeg or node not found on PATH");
             return;
         }
@@ -490,6 +493,9 @@ mod tests {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let fake_rife = manifest_dir.join("../../test/fake-rife.js");
         if !fake_rife.exists() {
+            if std::env::var("TWEEN_REQUIRE_E2E").map(|v| v == "1").unwrap_or(false) {
+                panic!("TWEEN_REQUIRE_E2E is set, but fake-rife.js was not found at {:?}", fake_rife);
+            }
             eprintln!("SKIPPING test_e2e_fake_rife: fake-rife.js not found at {:?}", fake_rife);
             return;
         }
