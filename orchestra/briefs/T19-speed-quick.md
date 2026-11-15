@@ -30,3 +30,9 @@ Measured baseline on an RTX 4050 Laptop at 1080p: about 18 output fps with v4.26
 ## Must not change
 
 UI files, which other tasks are editing. Do not change the default model or the output encoding settings.
+
+## README and benchmark rules (added by orchestrator)
+
+- README.md on main has a Benchmarks section. If you touch the README, rebase onto the current version and keep that section.
+- Do not invent benchmark numbers. Rows marked "pending" are filled in only from real `npm run bench` and `npm run test:gpu` output, which Claude runs on the user's GPU after the merge.
+- `npm run bench` must print a ready-to-paste README table row: version, engine mode, job, output fps, and the projected time for 10 minutes of video at 2x.

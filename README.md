@@ -87,11 +87,11 @@ Run `npm run test:gpu` and open an issue with the printed `setup` block and the 
 
 ## Supported systems
 
-| | Windows 10/11 | macOS 12+ (Apple Silicon and Intel) | Linux (x64, glibc) |
+| | Windows 10/11 | macOS (Apple Silicon and Intel) | Linux (x64, glibc) |
 |---|---|---|---|
 | Installer | NSIS `.exe` (per-user, no admin) | `.dmg` | AppImage, `.deb` |
 | GPU | NVIDIA, AMD, Intel (Vulkan) | Apple GPU (MoltenVK) | NVIDIA, AMD, Intel (Vulkan) |
-| Hardware encode | NVENC, AMF, Quick Sync | VideoToolbox | NVENC, VAAPI-class via FFmpeg |
+| Hardware encode | NVENC, AMF, Quick Sync | VideoToolbox | NVENC, Quick Sync (where the FFmpeg build supports them) |
 | Status | Tested on a real GPU | Builds in CI; GPU run pending | Builds in CI; GPU run pending |
 
 There is no GPU requirement. Without a working Vulkan device, Tween runs on the CPU (much slower) and tells you so.

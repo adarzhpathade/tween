@@ -25,3 +25,9 @@ Remove the disk round trip and the per-chunk model reload completely. Build a **
 ## Must not change
 
 UI files. File mode stays the default until the benchmark proves stream mode is faster and identical.
+
+## README and benchmark rules (added by orchestrator)
+
+- README.md on main has a Benchmarks section. If you touch the README, rebase onto the current version and keep that section.
+- Do not invent benchmark numbers. Rows marked "pending" are filled in only from real `npm run bench` and `npm run test:gpu` output, which Claude runs on the user's GPU after the merge.
+- File mode stays the default engine mode. Vendored source must carry its LICENSE and an UPSTREAM.md; nothing from VideoProc/Digiarty.
