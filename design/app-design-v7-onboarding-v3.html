@@ -9,14 +9,14 @@
 @font-face{font-family:"Geist Mono";src:url("../src/renderer/fonts/GeistMono-Variable.woff2") format("woff2");font-weight:100 900;font-display:swap}
 :root{
   --bg:#111; --bg2:#0c0c0c; --panel:#161616; --line:#2a2a2a; --line2:#383838;
-  --text:#ebe8e1; --mut:#8a8a85; --dim:#5f5f5b; --acc:#a9b79a; --ok:#4ade80;
+  --text:#ebe8e1; --mut:#8a8a85; --dim:#5f5f5b; --acc:#d9a55b; --acc-rgb:217,165,91; --acc-ink:#111; --ok:#4ade80;
   --sans:"Geist",system-ui,sans-serif; --mono:"Geist Mono",ui-monospace,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{font-family:var(--sans);color:var(--text);font-size:12.5px;overflow:hidden;display:grid;place-items:center;
   background:
-    radial-gradient(ellipse 60% 50% at 78% 88%,rgba(169,183,154,.55),transparent 70%),
+    radial-gradient(ellipse 60% 50% at 78% 88%,rgba(var(--acc-rgb),.55),transparent 70%),
     radial-gradient(ellipse 50% 60% at 12% 8%,rgba(70,60,140,.45),transparent 70%),
     radial-gradient(ellipse 70% 40% at 50% 120%,rgba(255,150,80,.25),transparent 70%),
     linear-gradient(160deg,#0b0c14,#14101c 55%,#1a0f12)}
@@ -44,7 +44,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .stage{position:relative;container-type:size;display:grid;place-items:center;padding:22px;background:var(--bg2);min-height:0;overflow:hidden}
 .stage>*{position:relative;z-index:1}
 .canvas{width:min(100cqw,calc(100cqh*16/9));aspect-ratio:16/9;position:relative;border:1px solid var(--line2);background:#000;overflow:hidden;box-shadow:0 20px 50px -20px #000}
-.scene{position:absolute;inset:0;background:radial-gradient(circle at 68% 58%,#a9b79a44 0 7%,transparent 22%),radial-gradient(circle at 68% 58%,#a9b79acc 0 1.6%,transparent 1.8%),linear-gradient(135deg,#262626,#0e0e0e)}
+.scene{position:absolute;inset:0;background:radial-gradient(circle at 68% 58%,rgba(var(--acc-rgb),.267) 0 7%,transparent 22%),radial-gradient(circle at 68% 58%,rgba(var(--acc-rgb),.8) 0 1.6%,transparent 1.8%),linear-gradient(135deg,#262626,#0e0e0e)}
 .scene.orig{filter:saturate(.8) contrast(.95)}
 .scene.orig::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 3px,rgba(0,0,0,.16) 3px 4px)}
 .res{clip-path:inset(0 0 0 50%)}
@@ -157,7 +157,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .strip{position:relative;display:flex;gap:6px;height:74px;margin-top:24px;padding:0}
 .fr{flex:1;border-radius:2px;position:relative}
 .fr.s{border:1px solid var(--acc);background:
-  radial-gradient(circle at 70% 62%,#ffb27a 0 8%,#a9b79a 9% 11%,transparent 12%),
+  radial-gradient(circle at 70% 62%,#ffb27a 0 8%,var(--acc) 9% 11%,transparent 12%),
   linear-gradient(#1b1f3a,#5b3a5e 50%,#e0794a 85%,#f2b27a)}
 .fr.g{border:1px dashed var(--line2);background:repeating-linear-gradient(135deg,transparent 0 5px,#ffffff07 5px 6px)}
 .strip .corner{width:12px;height:12px}
@@ -184,7 +184,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .recent{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line)}
 .rc{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);padding-right:14px}
 .rc .th{width:48px;height:27px;border:1px solid var(--line2);flex:none;background:
-  radial-gradient(circle at 70% 62%,#ffb27a 0 8%,#a9b79a 9% 11%,transparent 12%),
+  radial-gradient(circle at 70% 62%,#ffb27a 0 8%,var(--acc) 9% 11%,transparent 12%),
   linear-gradient(#1b1f3a,#5b3a5e 50%,#e0794a 85%,#f2b27a)}
 .rc .t2{filter:hue-rotate(80deg) saturate(.7)}.rc .t3{filter:hue-rotate(-40deg) saturate(1.2)}
 .rc b{display:block;font-weight:500;font-size:12px}.rc span{font-family:var(--mono);font-size:10px;color:var(--dim)}
@@ -230,7 +230,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 :root{--spring:linear(0,1);--spring-d:400ms}
 .welcome{position:relative;isolation:isolate}
 .welcome::before{content:"";position:absolute;left:-10%;right:-10%;bottom:-45%;height:85%;z-index:-1;pointer-events:none;
-  background:radial-gradient(ellipse at 50% 100%,rgba(169,183,154,.2),transparent 65%);animation:drift 9s ease-in-out infinite alternate}
+  background:radial-gradient(ellipse at 50% 100%,rgba(var(--acc-rgb),.2),transparent 65%);animation:drift 9s ease-in-out infinite alternate}
 @keyframes drift{from{transform:translateX(-6%) scale(1)}to{transform:translateX(6%) scale(1.18)}}
 .ln{display:block;overflow:hidden;padding-bottom:.1em;margin-bottom:-.1em}
 .ln>span{display:inline-block}
@@ -273,7 +273,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .ck.run .ic{border-top-color:var(--acc);animation:spin .75s linear infinite}
 .ck.ok{color:var(--text)}.ck.ok span{opacity:1;color:var(--mut)}
 .ck.ok .ic{background:var(--acc);border-color:var(--acc)}
-.ck.ok .ic::after{content:"";position:absolute;left:3px;top:.5px;width:3px;height:6px;border:solid #111;border-width:0 1.5px 1.5px 0;transform:rotate(40deg)}
+.ck.ok .ic::after{content:"";position:absolute;left:3px;top:.5px;width:3px;height:6px;border:solid var(--acc-ink);border-width:0 1.5px 1.5px 0;transform:rotate(40deg)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .devrow{display:flex;align-items:center;gap:14px;margin-top:16px}
 .devrow .seg button{padding:7px 12px;white-space:nowrap}
@@ -343,7 +343,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .pg[data-p="2"] .acg{margin-top:16px}
 .pg[data-p="2"] .ac{padding:22px 22px;min-height:150px}
 [hidden]{display:none!important}
-:root{--warn:#c9907a}
+:root{--warn:#e0695a}
 .chipb.solidb{background:var(--text);color:#111;border-color:var(--text)}
 .ck .dl{grid-column:2;display:none;align-items:center;gap:10px;margin-top:8px}
 .ck.miss .dl,.ck.dling .dl{display:flex}
@@ -367,7 +367,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 /* ---------- v7: home (add a video) ---------- */
 .dz{position:relative;border:1px dashed var(--line2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;transition:border-color .25s,background .25s;
   background:radial-gradient(circle,#ffffff14 1px,transparent 1.2px) 0 0/22px 22px,var(--bg2)}
-.dz:hover,.dz.over{border-color:var(--acc);background:radial-gradient(circle,#a9b79a30 1px,transparent 1.2px) 0 0/22px 22px,var(--bg2)}
+.dz:hover,.dz.over{border-color:var(--acc);background:radial-gradient(circle,rgba(var(--acc-rgb),.188) 1px,transparent 1.2px) 0 0/22px 22px,var(--bg2)}
 .dz .cm{position:absolute;width:12px;height:12px;border:0 solid #ffffff55}
 .dz .cm.a{left:-1px;top:-1px;border-top-width:1px;border-left-width:1px}.dz .cm.b{right:-1px;top:-1px;border-top-width:1px;border-right-width:1px}
 .dz .cm.c{left:-1px;bottom:-1px;border-bottom-width:1px;border-left-width:1px}.dz .cm.d{right:-1px;bottom:-1px;border-bottom-width:1px;border-right-width:1px}
@@ -415,7 +415,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .film i{flex:1;display:block}
 .shade{position:absolute;top:0;bottom:0;background:#0b0b0be0;pointer-events:none;transition:none}
 #shL{left:0;border-radius:3px 0 0 3px}#shR{right:0;border-radius:0 3px 3px 0}
-.sel{position:absolute;top:-2px;bottom:-2px;border-top:2px solid var(--acc);border-bottom:2px solid var(--acc);pointer-events:none;box-shadow:0 0 24px -6px var(--acc)}
+.sel{position:absolute;top:-2px;bottom:-2px;border-top:2px solid var(--acc);border-bottom:2px solid var(--acc);pointer-events:none}
 .hdl{position:absolute;top:-2px;bottom:-2px;width:14px;background:var(--acc);cursor:ew-resize;display:grid;place-items:center;z-index:3;transition:filter .2s}
 .hdl::after{content:"";width:2px;height:18px;border-radius:1px;background:#14140f80;box-shadow:4px 0 0 #14140f80,-4px 0 0 #14140f80;margin:0}
 .hdl.in{border-radius:6px 0 0 6px;transform:translateX(-100%)}
@@ -451,7 +451,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .lane{background:var(--bg2);border:1px solid var(--line);border-radius:4px;height:60px}
 .film{display:flex;align-items:center;gap:2px;padding:12px 4px 4px;border-radius:3px;background:repeating-linear-gradient(90deg,#ffffff22 0 1px,transparent 1px 8px) 0 0/100% 7px no-repeat}
 .film i{flex:1;min-width:1px;background:#ffffff55;border-radius:1px;align-self:center}
-.sel{background:#a9b79a14}
+.sel{background:rgba(var(--acc-rgb),.078)}
 .shade{background:#0e0e0ed8}
 .dz.sdz{flex-direction:row;gap:72px;padding:0 56px;text-align:left}
 .dzr{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
@@ -554,7 +554,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .insp .opt{display:flex;flex-direction:column;gap:8px;margin-top:10px}
 .insp .model{display:flex;align-items:center;gap:12px;padding:11px 12px;border:1px solid var(--line);border-radius:0;background:transparent;transition:border-color .2s,background .2s}
 .insp .model:hover{border-color:var(--line2);background:#ffffff05}
-.insp .model.on{border-color:var(--acc);background:#a9b79a12}
+.insp .model.on{border-color:var(--acc);background:rgba(var(--acc-rgb),.071)}
 .insp .model .mtx{flex:1;min-width:0}
 .insp .model .mtx b{display:block;font-weight:500;font-size:13px}
 .insp .model small{display:block;font-size:11px;color:var(--dim);margin-top:3px}
@@ -677,7 +677,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .vpill{position:absolute;z-index:0;top:0;bottom:0;left:0;width:0;background:var(--text);transition:transform var(--spring-d) var(--spring),width var(--spring-d) var(--spring)}
 /* design-review switcher (not part of the app) */review{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;background:#000a;backdrop-filter:blur(8px);border:1px solid #ffffff22;border-radius:99px;overflow:hidden;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
 .review span{padding:8px 14px;color:#777}
-.review button{padding:8px 14px;color:#aaa}.review button.on{background:var(--acc);color:#111}
+.review button{padding:8px 14px;color:#aaa}.review button.on{background:var(--acc);color:var(--acc-ink)}
 
 /* ---------- v7: adaptive frame-rate rows + custom entry in the counter ---------- */
 .frail{position:relative}
@@ -687,20 +687,20 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .rv{position:relative}
 .rv .fin{display:none;width:1.8em;padding:0 0 3px;margin:6px 0 0;border:0;border-bottom:1px solid var(--acc);border-radius:0;background:transparent;color:var(--text);text-align:center;outline:0;caret-color:var(--acc);cursor:ns-resize;transform:translateX(-8px);touch-action:none;-moz-appearance:textfield;box-sizing:content-box;height:46px;transition:color .2s,border-color .2s}
 .rv.edit .fin{display:block}
-.fin::selection{background:#a9b79a3d;color:inherit}
+.fin::selection{background:rgba(var(--acc-rgb),.239);color:inherit}
 .frail.nt,.frail.nt *{transition:none!important}
 .rv.edit .fr1:not(.fin){display:none}
-.rv.bad .fin{color:#c9907a;border-bottom-color:#c9907a}
+.rv.bad .fin{color:#e0695a;border-bottom-color:#e0695a}
 .stp{position:absolute;right:5px;top:38px;display:none;flex-direction:column;gap:3px}
 .rv.edit .stp{display:flex}
 .stp button{position:relative;width:15px;height:21px;border:1px solid var(--line2);border-radius:3px;color:var(--mut);transition:color .2s,border-color .2s,background .2s}
 .stp button:hover{color:var(--acc);border-color:var(--acc)}
-.stp button:active{background:#a9b79a22}
+.stp button:active{background:rgba(var(--acc-rgb),.133)}
 .stp button::before{content:"";position:absolute;left:50%;top:50%;width:4px;height:4px;border:solid currentColor;border-width:1px 0 0 1px;transform:translate(-50%,-30%) rotate(45deg)}
 .stp button.dn::before{transform:translate(-50%,-70%) rotate(225deg)}
 .fhint{position:absolute;right:calc(100% - 1px);top:calc(100% - 1px);z-index:7;display:none;white-space:nowrap;padding:7px 12px 7px 11px;background:var(--bg);border:1px solid var(--line2);border-right:0;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:var(--mut);transition:color .2s,border-color .2s}
 .rv.edit .fhint{display:block}
-.fhint.bad{color:#c9907a;border-color:#c9907a66}
+.fhint.bad{color:#e0695a;border-color:#e0695a66}
 
 /* ---------- v7: settings button + sheet; onboarding skip ---------- */
 .win{position:relative}
@@ -734,7 +734,7 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .sheet .opt{display:flex;flex-direction:column;gap:6px}
 .sheet .model{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid var(--line);background:transparent;transition:border-color .2s,background .2s}
 .sheet .model:hover{border-color:var(--line2);background:#ffffff05}
-.sheet .model.on{border-color:var(--acc);background:#a9b79a12}
+.sheet .model.on{border-color:var(--acc);background:rgba(var(--acc-rgb),.071)}
 .sheet .model .mtx{flex:1;min-width:0}
 .sheet .model .mtx b{display:block;font-weight:500;font-size:12.5px;color:var(--text)}
 .sheet .model small{display:block;font-size:11px;color:var(--dim);margin-top:2px}
@@ -1006,6 +1006,9 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 
 <script>
 const app=document.getElementById('app');
+/* mock-only: ?accent=<name> swaps the accent (--acc, --acc-rgb) on :root for colour comparison; default is sage */
+const ACCENTS={sage:'#a9b79a',ivory:'#e8e4da',amber:'#d9a55b',ember:'#e0795a',azure:'#7fa8d9',violet:'#a99bdb',mint:'#7fd1b9',lime:'#c8e06b'};
+(function(){try{const hex=ACCENTS[(location.search.match(/[?&]accent=(\w+)/)||[])[1]];if(!hex)return;const s=document.documentElement.style;s.setProperty('--acc',hex);s.setProperty('--acc-rgb',[1,3,5].map(i=>parseInt(hex.substr(i,2),16)).join(','));}catch(e){}})();
 /* mock-only: ?src=<fps> sets the source frame rate (default 24) */
 const SRC=Math.min(239,Math.max(1,+((location.search.match(/[?&]src=(\d+)/)||[])[1])||24));
 function setState(s){
