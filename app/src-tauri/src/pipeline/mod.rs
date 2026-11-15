@@ -23,7 +23,10 @@ pub use plan::{
     rife_threads,
 };
 pub use probe::{colour_of, probe};
-pub use runner::{kill_tree, resolve_temp_root, run_pipeline};
+pub use runner::{
+    fps_mode_args, fps_mode_args_for_support, kill_tree, parse_ffmpeg_version, resolve_temp_root,
+    run_pipeline, version_supports_fps_mode,
+};
 pub use splitter::PngSplitter;
 pub use stats::{sample_system_stats, show_in_folder, SystemMonitorState, SystemStats};
 pub use types::{
@@ -469,6 +472,25 @@ mod tests {
         .hdr);
     }
 
+    fn test_temp_dir(name: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tween-test-pipeline-{}-{}-{}-{}",
+            name,
+            std::process::id(),
+            count,
+            nanos
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
     #[tokio::test]
     async fn test_e2e_fake_rife() {
         let has_ffmpeg = std::process::Command::new("ffmpeg")
@@ -483,6 +505,9 @@ mod tests {
             .unwrap_or(false);
 
         if !has_ffmpeg || !has_node {
+            if std::env::var("TWEEN_REQUIRE_E2E").map(|v| v == "1").unwrap_or(false) {
+                panic!("TWEEN_REQUIRE_E2E is set, but ffmpeg or node was not found on PATH (has_ffmpeg={has_ffmpeg}, has_node={has_node})");
+            }
             eprintln!("SKIPPING test_e2e_fake_rife: ffmpeg or node not found on PATH");
             return;
         }
@@ -490,13 +515,14 @@ mod tests {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let fake_rife = manifest_dir.join("../../test/fake-rife.js");
         if !fake_rife.exists() {
+            if std::env::var("TWEEN_REQUIRE_E2E").map(|v| v == "1").unwrap_or(false) {
+                panic!("TWEEN_REQUIRE_E2E is set, but fake-rife.js was not found at {:?}", fake_rife);
+            }
             eprintln!("SKIPPING test_e2e_fake_rife: fake-rife.js not found at {:?}", fake_rife);
             return;
         }
 
-        let work = std::env::temp_dir().join(format!("tween-rust-e2e-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&work);
-        std::fs::create_dir_all(&work).unwrap();
+        let work = test_temp_dir("fake-rife");
 
         let clip = work.join("clip.mp4");
         let ff_gen = std::process::Command::new("ffmpeg")

@@ -21,6 +21,39 @@ pub const ARCH: &str = "arm64";
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub const ARCH: &str = "unknown";
 
+pub fn system_arch() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        #[cfg(target_arch = "aarch64")]
+        {
+            return "arm64";
+        }
+        #[cfg(target_arch = "x86_64")]
+        {
+            let mut translated: i32 = 0;
+            let mut size = std::mem::size_of::<i32>();
+            let name = b"sysctl.proc_translated\0";
+            let ret = unsafe {
+                libc::sysctlbyname(
+                    name.as_ptr() as *const libc::c_char,
+                    &mut translated as *mut _ as *mut libc::c_void,
+                    &mut size,
+                    std::ptr::null_mut(),
+                    0,
+                )
+            };
+            if ret == 0 && translated == 1 {
+                return "arm64";
+            }
+            return "x64";
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        ARCH
+    }
+}
+
 pub const RIFE_TAG: &str = "20250112";
 
 pub fn rife_zip() -> &'static str {
@@ -237,13 +270,88 @@ pub fn vendor_of(name: &str) -> &'static str {
     }
 }
 
+pub fn is_integrated_gpu(name: &str) -> bool {
+    // Discrete Intel Arc GPUs (e.g. Arc(TM) A770, Arc A750, Arc A580, Arc A380, Arc B580, etc.)
+    static DISCRETE_INTEL_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)arc(?:\(tm\))?\s+[a-z]?\d{3}").unwrap()
+    });
+    if DISCRETE_INTEL_RE.is_match(name) {
+        return false;
+    }
+
+    static INTEGRATED_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)uhd|iris|hd graphics|vega \d|radeon\(tm\) graphics|llvmpipe|swiftshader")
+            .unwrap()
+    });
+    static INTEL_GENERIC_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)intel(?:\(r\))?\s+(?:hd|uhd|iris|graphics)").unwrap()
+    });
+
+    INTEGRATED_RE.is_match(name) || INTEL_GENERIC_RE.is_match(name)
+}
+
+pub fn select_best_gpu(results: &[GpuDevice]) -> Option<GpuDevice> {
+    let mut usable: Vec<GpuDevice> = results.iter().filter(|d| d.ok).cloned().collect();
+    // Dedicated GPU first (integrated == false), then fastest (lowest ms)
+    usable.sort_by(|x, y| {
+        x.integrated
+            .cmp(&y.integrated)
+            .then_with(|| x.ms.cmp(&y.ms))
+    });
+    usable.first().cloned()
+}
+
+pub fn encoder_order_for_vendor(vendor: Option<&str>) -> Vec<&'static str> {
+    match vendor {
+        Some("amd") => vec![
+            "hevc_amf",
+            "h264_amf",
+            "hevc_nvenc",
+            "h264_nvenc",
+            "hevc_qsv",
+            "h264_qsv",
+            "hevc_videotoolbox",
+            "h264_videotoolbox",
+            "libx265",
+            "libx264",
+        ],
+        Some("intel") => vec![
+            "hevc_qsv",
+            "h264_qsv",
+            "hevc_nvenc",
+            "h264_nvenc",
+            "hevc_amf",
+            "h264_amf",
+            "hevc_videotoolbox",
+            "h264_videotoolbox",
+            "libx265",
+            "libx264",
+        ],
+        Some("nvidia") => vec![
+            "hevc_nvenc",
+            "h264_nvenc",
+            "hevc_amf",
+            "h264_amf",
+            "hevc_qsv",
+            "h264_qsv",
+            "hevc_videotoolbox",
+            "h264_videotoolbox",
+            "libx265",
+            "libx264",
+        ],
+        Some("apple") => vec![
+            "hevc_videotoolbox",
+            "h264_videotoolbox",
+            "libx265",
+            "libx264",
+        ],
+        _ => ENCODER_ORDER.to_vec(),
+    }
+}
+
 pub fn parse_vulkan_devices(stderr: &str) -> Vec<GpuDevice> {
     static DEV_RE: std::sync::LazyLock<regex::Regex> =
         std::sync::LazyLock::new(|| regex::Regex::new(r"(?m)^\[(\d+)\s+(.+?)\]\s+queueC=").unwrap());
-    static INTEGRATED_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"(?i)intel|uhd|iris|vega \d|radeon\(tm\) graphics|llvmpipe|swiftshader")
-            .unwrap()
-    });
 
     let mut seen: Vec<(i32, String)> = Vec::new();
     for cap in DEV_RE.captures_iter(stderr) {
@@ -262,7 +370,7 @@ pub fn parse_vulkan_devices(stderr: &str) -> Vec<GpuDevice> {
     seen.into_iter()
         .map(|(id, name)| {
             let vendor = vendor_of(&name).to_string();
-            let integrated = INTEGRATED_RE.is_match(&name);
+            let integrated = is_integrated_gpu(&name);
             GpuDevice {
                 id,
                 name,
@@ -483,30 +591,72 @@ pub async fn os_gpus() -> Vec<OsGpu> {
 
     let stdout = match output {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => return Vec::new(),
-    };
-
-    let json: serde_json::Value = match serde_json::from_str(&stdout) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
+        _ => String::new(),
     };
 
     let mut result = Vec::new();
-    if let Some(displays) = json.get("SPDisplaysDataType").and_then(|v| v.as_array()) {
-        for d in displays {
-            let name_opt = d
-                .get("sppci_model")
-                .or_else(|| d.get("_name"))
-                .and_then(|v| v.as_str());
-            if let Some(name) = name_opt {
-                result.push(OsGpu {
-                    name: name.trim().to_string(),
-                    driver: None,
-                    vendor: vendor_of(name).to_string(),
-                });
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+        if let Some(displays) = json.get("SPDisplaysDataType").and_then(|v| v.as_array()) {
+            for d in displays {
+                let name_opt = d
+                    .get("sppci_model")
+                    .or_else(|| d.get("_name"))
+                    .and_then(|v| v.as_str());
+                if let Some(name) = name_opt {
+                    result.push(OsGpu {
+                        name: name.trim().to_string(),
+                        driver: None,
+                        vendor: vendor_of(name).to_string(),
+                    });
+                }
             }
         }
     }
+
+    if result.is_empty() {
+        // Fallback 1: ioreg query for display / GPU devices
+        let ioreg_out = tokio::process::Command::new("ioreg")
+            .args(["-rc", "IOPCIDevice", "-k", "model"])
+            .output()
+            .await;
+        if let Ok(o) = ioreg_out {
+            let out_str = String::from_utf8_lossy(&o.stdout);
+            static IOREG_MODEL_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+                regex::Regex::new(r#""model"\s*=\s*<"([^"]+)">"#).unwrap()
+            });
+            for cap in IOREG_MODEL_RE.captures_iter(&out_str) {
+                if let Some(m) = cap.get(1) {
+                    let name = m.as_str().trim();
+                    if !name.is_empty() {
+                        result.push(OsGpu {
+                            name: name.to_string(),
+                            driver: None,
+                            vendor: vendor_of(name).to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Fallback 2: Apple Silicon brand name from sysctl
+        if result.is_empty() {
+            let sysctl_out = tokio::process::Command::new("sysctl")
+                .args(["-n", "machdep.cpu.brand_string"])
+                .output()
+                .await;
+            if let Ok(o) = sysctl_out {
+                let name = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if name.to_lowercase().contains("apple") {
+                    result.push(OsGpu {
+                        name: format!("{name} GPU"),
+                        driver: None,
+                        vendor: "apple".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
     result
 }
 
@@ -517,28 +667,86 @@ pub async fn os_gpus() -> Vec<OsGpu> {
         .output()
         .await;
 
-    let stdout = match output {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => return Vec::new(),
-    };
-
     let mut result = Vec::new();
-    for line in stdout.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
+    if let Ok(o) = output {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let name = if let Some(idx) = trimmed.find(": ") {
+                &trimmed[idx + 2..]
+            } else {
+                trimmed
+            };
+            result.push(OsGpu {
+                name: name.to_string(),
+                driver: None,
+                vendor: vendor_of(name).to_string(),
+            });
         }
-        let name = if let Some(idx) = trimmed.find(": ") {
-            &trimmed[idx + 2..]
-        } else {
-            trimmed
-        };
-        result.push(OsGpu {
-            name: name.to_string(),
-            driver: None,
-            vendor: vendor_of(name).to_string(),
-        });
     }
+
+    if result.is_empty() {
+        // Fallback 1: check NVIDIA driver info in /proc/driver/nvidia/gpus
+        if let Ok(entries) = std::fs::read_dir("/proc/driver/nvidia/gpus") {
+            for entry in entries.flatten() {
+                let info_file = entry.path().join("information");
+                if let Ok(content) = std::fs::read_to_string(info_file) {
+                    for line in content.lines() {
+                        if line.starts_with("Model:") {
+                            let model = line.trim_start_matches("Model:").trim();
+                            if !model.is_empty() {
+                                result.push(OsGpu {
+                                    name: model.to_string(),
+                                    driver: Some("nvidia".to_string()),
+                                    vendor: "nvidia".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback 2: /sys/bus/pci/devices checking PCI class 0x03xxxx (Display controllers)
+        if result.is_empty() {
+            if let Ok(entries) = std::fs::read_dir("/sys/bus/pci/devices") {
+                for entry in entries.flatten() {
+                    let dev_path = entry.path();
+                    let class_str = std::fs::read_to_string(dev_path.join("class")).unwrap_or_default();
+                    let class_trimmed = class_str.trim();
+                    // Class 0x03xxxx: 0300=VGA, 0301=XGA, 0302=3D controller, 0380=Other display
+                    if class_trimmed.starts_with("0x03") {
+                        let vendor_id = std::fs::read_to_string(dev_path.join("vendor")).unwrap_or_default();
+                        let vendor_trimmed = vendor_id.trim().to_lowercase();
+                        let vendor = match vendor_trimmed.as_str() {
+                            "0x10de" => "nvidia",
+                            "0x1002" => "amd",
+                            "0x8086" => "intel",
+                            _ => "other",
+                        };
+                        let name = match vendor {
+                            "nvidia" => "NVIDIA Display Controller",
+                            "amd" => "AMD Radeon Display Controller",
+                            "intel" => "Intel Display Controller",
+                            _ => "Display Controller",
+                        };
+                        let driver_link = std::fs::read_link(dev_path.join("driver")).ok();
+                        let driver = driver_link
+                            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
+                        result.push(OsGpu {
+                            name: name.to_string(),
+                            driver,
+                            vendor: vendor.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     result
 }
 
@@ -563,9 +771,10 @@ enum FfmpegSource {
 }
 
 fn ffmpeg_source() -> FfmpegSource {
+    let arch = system_arch();
     let b = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/";
     if PLATFORM == "win32" {
-        let file_name = if ARCH == "arm64" {
+        let file_name = if arch == "arm64" {
             "ffmpeg-master-latest-winarm64-gpl.zip"
         } else {
             "ffmpeg-master-latest-win64-gpl.zip"
@@ -575,7 +784,7 @@ fn ffmpeg_source() -> FfmpegSource {
             files: vec!["bin/ffmpeg.exe".to_string(), "bin/ffprobe.exe".to_string()],
         }
     } else if PLATFORM == "linux" {
-        let file_name = if ARCH == "arm64" {
+        let file_name = if arch == "arm64" {
             "ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
         } else {
             "ffmpeg-master-latest-linux64-gpl.tar.xz"
@@ -585,7 +794,7 @@ fn ffmpeg_source() -> FfmpegSource {
             files: vec!["bin/ffmpeg".to_string(), "bin/ffprobe".to_string()],
         }
     } else {
-        let a = if ARCH == "arm64" { "arm64" } else { "amd64" };
+        let a = if arch == "arm64" { "arm64" } else { "amd64" };
         let urls = vec![
             format!("https://ffmpeg.martin-riedl.de/redirect/latest/macos/{a}/release/ffmpeg.zip"),
             format!("https://ffmpeg.martin-riedl.de/redirect/latest/macos/{a}/release/ffprobe.zip"),
@@ -659,6 +868,14 @@ where
                 let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755));
             }
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = tokio::process::Command::new("xattr")
+            .args(["-dr", "com.apple.quarantine", p.ff_dir.to_str().unwrap_or(".")])
+            .output()
+            .await;
     }
 
     Ok(())
@@ -808,49 +1025,49 @@ async fn make_test_frames(
     let a = dir.join("a.png");
     let b = dir.join("b.png");
 
-    let run_ff = |args: &[&str]| {
+    let r1 = {
         let mut cmd = tokio::process::Command::new(ff);
-        cmd.args(args);
+        cmd.args([
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=256x144:rate=1",
+            "-frames:v",
+            "1",
+        ]);
+        cmd.arg(&a);
         #[cfg(windows)]
         cmd.creation_flags(0x08000000);
-        async move {
-            tokio::time::timeout(std::time::Duration::from_secs(60), cmd.output()).await
-        }
+        tokio::time::timeout(std::time::Duration::from_secs(60), cmd.output()).await
     };
-
-    let r1 = run_ff(&[
-        "-y",
-        "-v",
-        "error",
-        "-f",
-        "lavfi",
-        "-i",
-        "testsrc2=size=256x144:rate=1",
-        "-frames:v",
-        "1",
-        a.to_str().unwrap(),
-    ])
-    .await;
     match r1 {
         Ok(Ok(o)) if o.status.success() => {}
         _ => return Err("Failed to generate test frame a.png".to_string()),
     }
 
-    let r2 = run_ff(&[
-        "-y",
-        "-v",
-        "error",
-        "-f",
-        "lavfi",
-        "-i",
-        "testsrc2=size=256x144:rate=1",
-        "-vf",
-        "scroll=h=0.05",
-        "-frames:v",
-        "1",
-        b.to_str().unwrap(),
-    ])
-    .await;
+    let r2 = {
+        let mut cmd = tokio::process::Command::new(ff);
+        cmd.args([
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=256x144:rate=1",
+            "-vf",
+            "scroll=h=0.05",
+            "-frames:v",
+            "1",
+        ]);
+        cmd.arg(&b);
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000);
+        tokio::time::timeout(std::time::Duration::from_secs(60), cmd.output()).await
+    };
     match r2 {
         Ok(Ok(o)) if o.status.success() => {}
         _ => return Err("Failed to generate test frame b.png".to_string()),
@@ -896,18 +1113,16 @@ pub async fn self_test(
             let _ = tokio::fs::remove_file(&out).await;
             let start = std::time::Instant::now();
             let mut cmd = tokio::process::Command::new(&exe);
-            cmd.args([
-                "-0",
-                a.to_str().unwrap(),
-                "-1",
-                b.to_str().unwrap(),
-                "-o",
-                out.to_str().unwrap(),
-                "-m",
-                model_path.to_str().unwrap(),
-                "-g",
-                &g.to_string(),
-            ]);
+            cmd.arg("-0")
+                .arg(&a)
+                .arg("-1")
+                .arg(&b)
+                .arg("-o")
+                .arg(&out)
+                .arg("-m")
+                .arg(&model_path)
+                .arg("-g")
+                .arg(g.to_string());
             cmd.current_dir(&rife_dir);
             #[cfg(windows)]
             cmd.creation_flags(0x08000000);
@@ -958,18 +1173,10 @@ pub async fn self_test(
         }
     }
 
-    let mut usable: Vec<GpuDevice> = results.iter().filter(|d| d.ok).cloned().collect();
-    // Dedicated GPU first (integrated == false), then fastest (lowest ms)
-    usable.sort_by(|x, y| {
-        x.integrated
-            .cmp(&y.integrated)
-            .then_with(|| x.ms.cmp(&y.ms))
-    });
-
-    if let Some(best) = usable.first() {
+    if let Some(best) = select_best_gpu(&results) {
         return SelfTestResult {
             mode: "gpu".to_string(),
-            gpu: Some(best.clone()),
+            gpu: Some(best),
             devices: results,
             error: None,
         };
@@ -1010,7 +1217,7 @@ pub async fn self_test(
     }
 }
 
-pub async fn probe_encoders(ff: &str) -> Vec<String> {
+pub async fn probe_encoders_with_order(ff: &str, order: &[&str]) -> Vec<String> {
     let mut cmd = tokio::process::Command::new(ff);
     cmd.args(["-hide_banner", "-encoders"]);
     #[cfg(windows)]
@@ -1021,7 +1228,7 @@ pub async fn probe_encoders(ff: &str) -> Vec<String> {
     };
 
     let mut working = Vec::new();
-    for &id in ENCODER_ORDER {
+    for &id in order {
         let pattern = format!(r"\b{}\b", regex::escape(id));
         let re = match regex::Regex::new(&pattern) {
             Ok(r) => r,
@@ -1059,6 +1266,15 @@ pub async fn probe_encoders(ff: &str) -> Vec<String> {
     }
 
     working
+}
+
+pub async fn probe_encoders_for_vendor(ff: &str, vendor: Option<&str>) -> Vec<String> {
+    let order = encoder_order_for_vendor(vendor);
+    probe_encoders_with_order(ff, &order).await
+}
+
+pub async fn probe_encoders(ff: &str) -> Vec<String> {
+    probe_encoders_with_order(ff, ENCODER_ORDER).await
 }
 
 fn now_iso() -> String {
@@ -1103,7 +1319,7 @@ where
     let p = paths(&opts.base_dir);
     let mut cfg = SetupConfig {
         platform: PLATFORM.to_string(),
-        arch: ARCH.to_string(),
+        arch: system_arch().to_string(),
         checked_at: now_iso(),
         ..Default::default()
     };
@@ -1134,7 +1350,8 @@ where
     let free_gb = free
         .map(|b| format!(" · {:.0} GB free", (b as f64) / 1e9))
         .unwrap_or_default();
-    let detail = format!("{platform_display} {ARCH} · {cpus} threads{ram_gb}{free_gb}");
+    let arch = system_arch();
+    let detail = format!("{platform_display} {arch} · {cpus} threads{ram_gb}{free_gb}");
     let state = if free.map(|f| f < 4_000_000_000).unwrap_or(false) {
         "warn"
     } else {
@@ -1460,7 +1677,7 @@ where
         link: None,
     });
 
-    let encoders = probe_encoders(&ff.ffmpeg).await;
+    let encoders = probe_encoders_for_vendor(&ff.ffmpeg, st.gpu.as_ref().map(|g| g.vendor.as_str())).await;
     cfg.encoders = Some(encoders.clone());
     let hw: Vec<&str> = encoders.iter().filter(|e| !e.starts_with("lib")).map(|s| s.as_str()).collect();
     let detail = if !hw.is_empty() {
@@ -1590,12 +1807,35 @@ pub fn open_url(url: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("Failed to open browser: {e}"))?;
     }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        return Err("Unsupported platform for opening browser".to_string());
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_temp_dir(name: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tween-test-setup-{}-{}-{}-{}",
+            name,
+            std::process::id(),
+            count,
+            nanos
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
 
     #[test]
     fn test_is_allowed_driver_url() {
@@ -1653,8 +1893,7 @@ mod tests {
 
     #[test]
     fn test_config_save_load() {
-        let tmp = std::env::temp_dir().join(format!("tween-test-cfg-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = test_temp_dir("cfg");
 
         let cfg = SetupConfig {
             platform: "win32".to_string(),
@@ -1863,6 +2102,10 @@ mod tests {
         data: Vec<u8>,
         fail_first_range: bool,
     ) -> (String, tokio::sync::oneshot::Sender<()>) {
+        unsafe {
+            std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
+            std::env::set_var("no_proxy", "127.0.0.1,localhost");
+        }
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -1944,8 +2187,7 @@ mod tests {
         let zip_bytes = make_test_zip(false);
         let (url, shutdown) = spawn_range_server(zip_bytes, false).await;
 
-        let tmp = std::env::temp_dir().join(format!("tween-test-extract-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = test_temp_dir("zip-extract");
 
         let want = ["bin/ffmpeg.exe", "LICENSE", "rife-v4.26/"];
         let mut progress_calls = 0;
@@ -1999,8 +2241,7 @@ mod tests {
         let zip_bytes = make_test_zip(false);
         let (url, shutdown) = spawn_range_server(zip_bytes, true).await;
 
-        let tmp = std::env::temp_dir().join(format!("tween-test-retry-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = test_temp_dir("retry");
 
         let want = ["LICENSE"];
         crate::remotezip::fetch_from_zip(&url, &want, &tmp, |_g, _t| {})
@@ -2013,15 +2254,223 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[tokio::test]
+    #[ignore = "runs setup installer against real download URLs"]
+    async fn test_real_setup_downloads() {
+        let tmp = test_temp_dir("real-download");
+        let p = paths(&tmp);
+
+        // 1. Test real FFmpeg download & extraction
+        install_ffmpeg(&p, |_got, _total| {})
+            .await
+            .expect("install_ffmpeg should succeed with real download URLs");
+
+        let exe_suffix = if PLATFORM == "win32" { ".exe" } else { "" };
+        let ffmpeg_bin = p.ff_dir.join(format!("ffmpeg{exe_suffix}"));
+        let ffprobe_bin = p.ff_dir.join(format!("ffprobe{exe_suffix}"));
+
+        assert!(ffmpeg_bin.exists(), "ffmpeg binary should exist at {:?}", ffmpeg_bin);
+        assert!(ffprobe_bin.exists(), "ffprobe binary should exist at {:?}", ffprobe_bin);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta_ff = std::fs::metadata(&ffmpeg_bin).expect("metadata ffmpeg");
+            let meta_probe = std::fs::metadata(&ffprobe_bin).expect("metadata ffprobe");
+            assert_ne!(
+                meta_ff.permissions().mode() & 0o111,
+                0,
+                "ffmpeg should be executable"
+            );
+            assert_ne!(
+                meta_probe.permissions().mode() & 0o111,
+                0,
+                "ffprobe should be executable"
+            );
+        }
+
+        // Run `ffmpeg -version`
+        let mut cmd = std::process::Command::new(&ffmpeg_bin);
+        cmd.arg("-version");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        let output = cmd.output().expect("ffmpeg -version should execute");
+        assert!(output.status.success(), "ffmpeg -version should exit successfully: {:?}", output);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("ffmpeg version"),
+            "ffmpeg -version stdout should contain version string: {}",
+            stdout
+        );
+
+        // 2. Test real RIFE download & extraction
+        install_rife(&p, &["rife-v4.26".to_string()], |_got, _total| {})
+            .await
+            .expect("install_rife should succeed with real download URLs");
+
+        let rife_binary = rife_exe(&p.rife_dir);
+        assert!(rife_binary.exists(), "rife binary should exist at {:?}", rife_binary);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta_rife = std::fs::metadata(&rife_binary).expect("metadata rife");
+            assert_ne!(
+                meta_rife.permissions().mode() & 0o111,
+                0,
+                "rife binary should be executable"
+            );
+        }
+
+        assert!(p.rife_dir.join("LICENSE").exists(), "RIFE LICENSE should exist");
+        let model_dir = p.rife_dir.join("rife-v4.26");
+        assert!(
+            model_dir.join("flownet.bin").exists(),
+            "flownet.bin should exist in rife-v4.26"
+        );
+        assert!(
+            model_dir.join("flownet.param").exists(),
+            "flownet.param should exist in rife-v4.26"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_amd_and_intel_vulkan_device_parsing() {
+        let stderr = r#"
+[0 AMD Radeon RX 6600]  queueC=0[1] queueG=0[1] queueT=0[1]
+[1 AMD Radeon(TM) Graphics]  queueC=0[1] queueG=0[1] queueT=0[1]
+[2 Intel(R) Arc(TM) A770 Graphics]  queueC=0[1] queueG=0[1] queueT=0[1]
+[3 Intel(R) UHD Graphics 770]  queueC=0[1] queueG=0[1] queueT=0[1]
+"#;
+        let devs = parse_vulkan_devices(stderr);
+        assert_eq!(devs.len(), 4);
+
+        // 0: AMD Radeon RX 6600 (discrete AMD)
+        assert_eq!(devs[0].id, 0);
+        assert_eq!(devs[0].name, "AMD Radeon RX 6600");
+        assert_eq!(devs[0].vendor, "amd");
+        assert!(!devs[0].integrated, "RX 6600 should be discrete");
+
+        // 1: AMD Radeon(TM) Graphics (integrated AMD)
+        assert_eq!(devs[1].id, 1);
+        assert_eq!(devs[1].name, "AMD Radeon(TM) Graphics");
+        assert_eq!(devs[1].vendor, "amd");
+        assert!(devs[1].integrated, "Radeon(TM) Graphics should be integrated");
+
+        // 2: Intel Arc A770 (discrete Intel)
+        assert_eq!(devs[2].id, 2);
+        assert_eq!(devs[2].name, "Intel(R) Arc(TM) A770 Graphics");
+        assert_eq!(devs[2].vendor, "intel");
+        assert!(!devs[2].integrated, "Intel Arc A770 should be discrete");
+
+        // 3: Intel UHD 770 (integrated Intel)
+        assert_eq!(devs[3].id, 3);
+        assert_eq!(devs[3].name, "Intel(R) UHD Graphics 770");
+        assert_eq!(devs[3].vendor, "intel");
+        assert!(devs[3].integrated, "Intel UHD 770 should be integrated");
+    }
+
+    #[test]
+    fn test_two_gpu_laptop_discrete_wins() {
+        // AMD laptop: iGPU + discrete GPU
+        let amd_igpu = GpuDevice {
+            id: 0,
+            name: "AMD Radeon(TM) Graphics".into(),
+            vendor: "amd".into(),
+            integrated: true,
+            ok: true,
+            ms: 35,
+        };
+        let amd_dgpu = GpuDevice {
+            id: 1,
+            name: "AMD Radeon RX 6600M".into(),
+            vendor: "amd".into(),
+            integrated: false,
+            ok: true,
+            ms: 55,
+        };
+        let best_amd = select_best_gpu(&[amd_igpu.clone(), amd_dgpu.clone()]);
+        assert_eq!(best_amd.as_ref().map(|g| g.id), Some(1), "Discrete AMD GPU should win over faster iGPU");
+
+        // Intel laptop: Intel UHD iGPU + Intel Arc discrete GPU
+        let intel_igpu = GpuDevice {
+            id: 0,
+            name: "Intel(R) UHD Graphics 770".into(),
+            vendor: "intel".into(),
+            integrated: true,
+            ok: true,
+            ms: 30,
+        };
+        let intel_dgpu = GpuDevice {
+            id: 1,
+            name: "Intel(R) Arc(TM) A770 Graphics".into(),
+            vendor: "intel".into(),
+            integrated: false,
+            ok: true,
+            ms: 60,
+        };
+        let best_intel = select_best_gpu(&[intel_igpu.clone(), intel_dgpu.clone()]);
+        assert_eq!(best_intel.as_ref().map(|g| g.id), Some(1), "Discrete Intel Arc GPU should win over faster UHD iGPU");
+
+        // When discrete GPU fails self-test, integrated GPU should win
+        let failed_dgpu = GpuDevice {
+            id: 1,
+            name: "Intel(R) Arc(TM) A770 Graphics".into(),
+            vendor: "intel".into(),
+            integrated: false,
+            ok: false,
+            ms: 60,
+        };
+        let best_fallback = select_best_gpu(&[intel_igpu.clone(), failed_dgpu]);
+        assert_eq!(best_fallback.as_ref().map(|g| g.id), Some(0), "Working integrated GPU should win when discrete fails");
+
+        // When all GPUs fail self-test, select_best_gpu returns None (triggering CPU mode)
+        let failed_igpu = GpuDevice {
+            id: 0,
+            name: "Intel(R) UHD Graphics 770".into(),
+            vendor: "intel".into(),
+            integrated: true,
+            ok: false,
+            ms: 30,
+        };
+        assert_eq!(select_best_gpu(&[failed_igpu]), None);
+        assert_eq!(select_best_gpu(&[]), None);
+    }
+
+    #[test]
+    fn test_encoder_probe_order_vendor_preference() {
+        let amd_order = encoder_order_for_vendor(Some("amd"));
+        let amf_pos = amd_order.iter().position(|e| *e == "hevc_amf").unwrap();
+        let qsv_pos_in_amd = amd_order.iter().position(|e| *e == "hevc_qsv").unwrap();
+        assert!(amf_pos < qsv_pos_in_amd, "AMF should be prioritized before QSV on AMD");
+
+        let intel_order = encoder_order_for_vendor(Some("intel"));
+        let qsv_pos = intel_order.iter().position(|e| *e == "hevc_qsv").unwrap();
+        let amf_pos_in_intel = intel_order.iter().position(|e| *e == "hevc_amf").unwrap();
+        assert!(qsv_pos < amf_pos_in_intel, "QSV should be prioritized before AMF on Intel");
+
+        // Simulated probe filtering:
+        // On an AMD system where only AMF and software encoders are functional:
+        let available_on_amd = ["hevc_amf", "h264_amf", "libx265", "libx264"];
+        let chosen_amd: Vec<&str> = amd_order.into_iter().filter(|e| available_on_amd.contains(e)).collect();
+        assert_eq!(chosen_amd[0], "hevc_amf");
+        assert_eq!(chosen_amd[1], "h264_amf");
+
+        // On an Intel system where only QSV and software encoders are functional:
+        let available_on_intel = ["hevc_qsv", "h264_qsv", "libx265", "libx264"];
+        let chosen_intel: Vec<&str> = intel_order.into_iter().filter(|e| available_on_intel.contains(e)).collect();
+        assert_eq!(chosen_intel[0], "hevc_qsv");
+        assert_eq!(chosen_intel[1], "h264_qsv");
+    }
+
     #[test]
     #[ignore = "requires real GPU and installed RIFE engine to run"]
     fn test_real_gpu_self_test() {
         // Run with: cargo test -- --ignored test_real_gpu_self_test
-    }
-
-    #[test]
-    #[ignore = "requires network access to TNTwise/rife-ncnn-vulkan"]
-    fn test_real_rife_download() {
-        // Run with: cargo test -- --ignored test_real_rife_download
     }
 }

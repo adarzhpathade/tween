@@ -7,13 +7,129 @@ use super::splitter::PngSplitter;
 use super::types::{
     ColourInput, JobFinished, JobProgressEvent, JobRequest, PipelineConfig, StageTimes,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
+
+static FPS_MODE_SUPPORT: LazyLock<StdMutex<HashMap<String, bool>>> =
+    LazyLock::new(|| StdMutex::new(HashMap::new()));
+
+pub fn parse_ffmpeg_version(output: &str) -> Option<(u32, u32)> {
+    static VER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)ffmpeg\s+version\s+n?(\d+)(?:[.-](\d+))?").unwrap()
+    });
+    if let Some(caps) = VER_RE.captures(output) {
+        let major: u32 = caps.get(1)?.as_str().parse().ok()?;
+        let minor: u32 = caps.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+        return Some((major, minor));
+    }
+    None
+}
+
+pub fn version_supports_fps_mode(version_output: &str) -> bool {
+    if let Some((major, minor)) = parse_ffmpeg_version(version_output) {
+        if major > 5 {
+            return true;
+        }
+        if major == 5 {
+            return minor >= 1;
+        }
+        return false;
+    }
+    // Handle N-112345 git master builds
+    static N_GIT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)ffmpeg\s+version\s+N-(\d+)").unwrap()
+    });
+    if let Some(caps) = N_GIT_RE.captures(version_output) {
+        if let Some(num_str) = caps.get(1) {
+            if let Ok(build_num) = num_str.as_str().parse::<u32>() {
+                return build_num >= 107000;
+            }
+        }
+        return true;
+    }
+    // Direct token check if help or docs mentioned fps_mode
+    if version_output.contains("fps_mode") {
+        return true;
+    }
+    // Fallback: if it explicitly indicates 4.x or earlier, false; otherwise default to true
+    !version_output.contains("version 4.")
+        && !version_output.contains("version 3.")
+        && !version_output.contains("version 2.")
+}
+
+pub fn fps_mode_args_for_support(supports_fps_mode: bool, mode: &str) -> (&'static str, &'static str) {
+    if supports_fps_mode {
+        ("-fps_mode", match mode {
+            "cfr" => "cfr",
+            "vfr" => "vfr",
+            _ => "passthrough",
+        })
+    } else {
+        ("-vsync", match mode {
+            "cfr" => "cfr",
+            "vfr" => "vfr",
+            _ => "passthrough",
+        })
+    }
+}
+
+pub fn probe_ffmpeg_fps_mode_support(ffmpeg_bin: &str) -> bool {
+    let mut cmd = std::process::Command::new(ffmpeg_bin);
+    cmd.arg("-version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    if let Ok(output) = cmd.output() {
+        if output.status.success() {
+            let s = String::from_utf8_lossy(&output.stdout);
+            return version_supports_fps_mode(&s);
+        }
+    }
+
+    // Fallback: probe `ffmpeg -h`
+    let mut h_cmd = std::process::Command::new(ffmpeg_bin);
+    h_cmd.arg("-h");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        h_cmd.creation_flags(0x08000000);
+    }
+    if let Ok(output) = h_cmd.output() {
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if text.contains("-fps_mode") || text.contains("fps_mode") {
+            return true;
+        }
+    }
+
+    // Default to true for modern systems if binary wasn't found or couldn't run
+    true
+}
+
+pub fn ffmpeg_supports_fps_mode(ffmpeg_bin: &str) -> bool {
+    let mut map = FPS_MODE_SUPPORT.lock().unwrap();
+    if let Some(&supported) = map.get(ffmpeg_bin) {
+        return supported;
+    }
+    let supported = probe_ffmpeg_fps_mode_support(ffmpeg_bin);
+    map.insert(ffmpeg_bin.to_string(), supported);
+    supported
+}
+
+pub fn fps_mode_args(ffmpeg_bin: &str, mode: &str) -> (&'static str, &'static str) {
+    let supported = ffmpeg_supports_fps_mode(ffmpeg_bin);
+    fps_mode_args_for_support(supported, mode)
+}
 
 pub fn kill_tree(pid: u32) {
     if pid == 0 {
@@ -174,13 +290,14 @@ pub fn spawn_streaming_extractor(
         ext_cmd.args(["-hwaccel", "auto"]);
     }
     ext_cmd.args(trim_args);
+    let (fps_flag, fps_val) = fps_mode_args(ffmpeg, "passthrough");
     ext_cmd.args([
         "-i",
         file,
         "-map",
         "0:v:0",
-        "-fps_mode",
-        "passthrough",
+        fps_flag,
+        fps_val,
         "-an",
         "-sn",
         "-vf",
@@ -538,13 +655,14 @@ where
     let mut an_cmd = tokio::process::Command::new(&cfg.ffmpeg);
     an_cmd.args(["-v", "error"]);
     an_cmd.args(&trim_args);
+    let (fps_flag, fps_val) = fps_mode_args(&cfg.ffmpeg, "passthrough");
     an_cmd.args([
         "-i",
         &info.file,
         "-map",
         "0:v:0",
-        "-fps_mode",
-        "passthrough",
+        fps_flag,
+        fps_val,
         "-an",
         "-sn",
         "-vf",
@@ -761,8 +879,9 @@ where
     ff_args.push("-color_range".to_string());
     ff_args.push("tv".to_string());
 
-    ff_args.push("-fps_mode".to_string());
-    ff_args.push("cfr".to_string());
+    let (fps_flag, fps_val) = fps_mode_args(&cfg.ffmpeg, "cfr");
+    ff_args.push(fps_flag.to_string());
+    ff_args.push(fps_val.to_string());
     ff_args.push("-t".to_string());
     ff_args.push(format!("{:.6}", total as f64 / r.out_fps));
 
@@ -1245,6 +1364,7 @@ where
         seconds,
         (encoded as f64) / seconds.max(0.001)
     );
+    let _ = cut_fix_total_ms;
 
     let finished = JobFinished {
         ok: true,
@@ -1276,4 +1396,139 @@ where
     });
 
     Ok(finished)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_ffmpeg_version() {
+        assert_eq!(
+            parse_ffmpeg_version("ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021 the FFmpeg developers"),
+            Some((4, 4))
+        );
+        assert_eq!(
+            parse_ffmpeg_version("ffmpeg version 4.4 Copyright (c) 2000-2021 the FFmpeg developers"),
+            Some((4, 4))
+        );
+        assert_eq!(
+            parse_ffmpeg_version("ffmpeg version 5.0.1 Copyright (c) 2000-2022 the FFmpeg developers"),
+            Some((5, 0))
+        );
+        assert_eq!(
+            parse_ffmpeg_version("ffmpeg version 5.1 Copyright (c) 2000-2022 the FFmpeg developers"),
+            Some((5, 1))
+        );
+        assert_eq!(
+            parse_ffmpeg_version("ffmpeg version 5.1.2-0ubuntu1 Copyright (c) 2000-2022 the FFmpeg developers"),
+            Some((5, 1))
+        );
+        assert_eq!(
+            parse_ffmpeg_version("ffmpeg version 6.0-full_build-www.gyan.dev"),
+            Some((6, 0))
+        );
+        assert_eq!(
+            parse_ffmpeg_version("ffmpeg version 7.1-essentials_build-www.gyan.dev"),
+            Some((7, 1))
+        );
+        assert_eq!(
+            parse_ffmpeg_version("ffmpeg version n5.1-1-g0ef854"),
+            Some((5, 1))
+        );
+        assert_eq!(
+            parse_ffmpeg_version("ffmpeg version 2024-03-24-git-b778c1c5fa"),
+            Some((2024, 3))
+        );
+    }
+
+    #[test]
+    fn test_version_supports_fps_mode() {
+        // FFmpeg 4.4.2 (Ubuntu 22.04 LTS apt) does NOT support -fps_mode
+        assert!(!version_supports_fps_mode(
+            "ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021 the FFmpeg developers"
+        ));
+        assert!(!version_supports_fps_mode(
+            "ffmpeg version 4.4 Copyright (c) 2000-2021 the FFmpeg developers"
+        ));
+        assert!(!version_supports_fps_mode(
+            "ffmpeg version 5.0-1 Copyright (c) 2000-2022 the FFmpeg developers"
+        ));
+
+        // FFmpeg 5.1+ supports -fps_mode
+        assert!(version_supports_fps_mode(
+            "ffmpeg version 5.1.2-0ubuntu1 Copyright (c) 2000-2022 the FFmpeg developers"
+        ));
+        assert!(version_supports_fps_mode(
+            "ffmpeg version 6.0-full_build-www.gyan.dev"
+        ));
+        assert!(version_supports_fps_mode(
+            "ffmpeg version 7.1-essentials_build-www.gyan.dev"
+        ));
+        assert!(version_supports_fps_mode(
+            "ffmpeg version 2024-03-24-git-b778c1c5fa-full_build"
+        ));
+        assert!(version_supports_fps_mode(
+            "ffmpeg version N-112345-g89714859"
+        ));
+    }
+
+    #[test]
+    fn test_fps_mode_arg_selection() {
+        // When -fps_mode is supported (FFmpeg >= 5.1)
+        assert_eq!(
+            fps_mode_args_for_support(true, "passthrough"),
+            ("-fps_mode", "passthrough")
+        );
+        assert_eq!(
+            fps_mode_args_for_support(true, "cfr"),
+            ("-fps_mode", "cfr")
+        );
+        assert_eq!(
+            fps_mode_args_for_support(true, "vfr"),
+            ("-fps_mode", "vfr")
+        );
+
+        // When -fps_mode is NOT supported (FFmpeg 4.4 on Ubuntu 22.04)
+        // Pipeline must fallback to -vsync cfr / vfr / passthrough
+        assert_eq!(
+            fps_mode_args_for_support(false, "passthrough"),
+            ("-vsync", "passthrough")
+        );
+        assert_eq!(
+            fps_mode_args_for_support(false, "cfr"),
+            ("-vsync", "cfr")
+        );
+        assert_eq!(
+            fps_mode_args_for_support(false, "vfr"),
+            ("-vsync", "vfr")
+        );
+    }
+
+    #[test]
+    fn test_cached_fps_mode_support() {
+        // Test manual cache insertion and lookup
+        {
+            let mut map = FPS_MODE_SUPPORT.lock().unwrap();
+            map.insert("mock-ffmpeg-4.4".into(), false);
+            map.insert("mock-ffmpeg-7.1".into(), true);
+        }
+
+        assert_eq!(
+            fps_mode_args("mock-ffmpeg-4.4", "passthrough"),
+            ("-vsync", "passthrough")
+        );
+        assert_eq!(
+            fps_mode_args("mock-ffmpeg-4.4", "cfr"),
+            ("-vsync", "cfr")
+        );
+        assert_eq!(
+            fps_mode_args("mock-ffmpeg-7.1", "passthrough"),
+            ("-fps_mode", "passthrough")
+        );
+        assert_eq!(
+            fps_mode_args("mock-ffmpeg-7.1", "cfr"),
+            ("-fps_mode", "cfr")
+        );
+    }
 }

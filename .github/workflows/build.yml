@@ -26,6 +26,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            ffmpeg \
             libwebkit2gtk-4.1-dev \
             build-essential \
             curl \
@@ -36,6 +37,14 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             squashfs-tools
+
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --yes --no-progress
+
+      - name: Install FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -54,7 +63,12 @@ jobs:
         run: npm ci
 
       - name: Run Cargo tests
+        env:
+          TWEEN_REQUIRE_E2E: "1"
         run: cargo test --manifest-path app/src-tauri/Cargo.toml
+
+      - name: Run real setup download tests
+        run: cargo test --manifest-path app/src-tauri/Cargo.toml -- --ignored test_real_setup_downloads
 
       - name: Build Tauri app
         working-directory: app
