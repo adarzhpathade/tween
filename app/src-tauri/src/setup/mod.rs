@@ -139,6 +139,8 @@ pub struct SetupConfig {
     pub devices: Option<Vec<GpuDevice>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoders: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paths_exist: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1518,7 +1520,35 @@ pub fn setup_config(app: tauri::AppHandle) -> Result<Option<SetupConfig>, String
         .app_data_dir()
         .map_err(|e| format!("Could not get app data dir: {e}"))?;
 
-    Ok(load_config(&base_dir))
+    let mut cfg = match load_config(&base_dir) {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+    let ffmpeg_ok = cfg.ffmpeg.as_ref().map(|p| Path::new(p).exists()).unwrap_or(false);
+    let rife_ok = cfg.rife_dir.as_ref().map(|p| Path::new(p).exists()).unwrap_or(false);
+    cfg.paths_exist = Some(ffmpeg_ok && rife_ok);
+    Ok(Some(cfg))
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", &url]);
+        cmd.creation_flags(0x08000000);
+        let _ = cmd.spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1585,6 +1615,7 @@ mod tests {
             }),
             devices: Some(vec![]),
             encoders: Some(vec!["hevc_nvenc".to_string()]),
+            paths_exist: None,
         };
 
         save_config(&tmp, &cfg).expect("save_config should succeed");
