@@ -400,6 +400,13 @@ export const ScreenRouter: React.FC = () => {
         onClose={handleCloseSettings}
         isJobRunning={screen === "processing"}
         lastJobError={jobError}
+        knownVideoNames={
+          [
+            activeProbe?.file,
+            activeProbe?.name,
+            activeJob?.output,
+          ].filter(Boolean) as string[]
+        }
         setupConfig={setupCfg}
         onSetupUpdated={setSetupCfg}
       />

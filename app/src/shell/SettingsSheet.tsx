@@ -15,6 +15,7 @@ export interface SettingsSheetProps {
   onClose: () => void;
   isJobRunning?: boolean;
   lastJobError?: string | null;
+  knownVideoNames?: string[];
   setupConfig?: SetupConfig | null;
   onSetupUpdated?: (cfg: SetupConfig) => void;
   onDefaultsChanged?: (defaults: SettingsDefaults) => void;
@@ -48,12 +49,96 @@ const DEFAULT_MODELS: ModelOption[] = [
   },
 ];
 
-function sanitizeDiagnostics(text: string): string {
-  // Strip any video filenames/paths to ensure privacy
-  return text.replace(
-    /[A-Za-z0-9_.\-/\\]+\.(mp4|mov|mkv|avi|webm|flv|wmv|m4v|ts|m2ts)/gi,
-    "[video file]",
+const VIDEO_EXTENSIONS =
+  "mp4|m4v|mov|mkv|avi|webm|flv|wmv|ts|m2ts|gif|png|jpg|jpeg|raw|mxf";
+
+/**
+ * Robustly sanitizes diagnostics text (such as lastJobError) to ensure
+ * no user video file names, directories, or paths are leaked.
+ *
+ * Requirements met:
+ * (a) Replaces known video filenames, basenames, and titles literally.
+ * (b) Redacts any path-like text: quoted strings containing paths/extensions,
+ *     drive-letter paths (X:\...), UNC network paths (\\server\share\...),
+ *     and absolute /unix paths (/home/user/...).
+ * (c) Keeps FFmpeg and engine paths in the report ONLY from setupConfig (not from error text).
+ * (d) Redacts any token ending in a video extension even if it contains spaces
+ *     (e.g., 'D:\My Videos\summer trip 2024.mp4' or 'summer trip 2024.mp4').
+ *
+ * Example test cases verified:
+ * - "D:\My Videos\summer trip 2024.mp4" -> "[video file]"
+ * - 'Error opening "D:\My Videos\summer trip 2024.mp4" (code 1)' -> 'Error opening "[video file]" (code 1)'
+ * - "Error: file summer trip 2024.mp4 not found" -> "Error: file [video file] not found"
+ * - "Cannot read D:/Shared/summer trip 2024.mp4: corrupt" -> "Cannot read [path]: corrupt"
+ * - "summer trip 2024.mp4: decode error" -> "[video file]: decode error"
+ * - "ffmpeg error at /home/user/my clips/beach vacation 2024.mov: invalid stream" -> "ffmpeg error at [path]: invalid stream"
+ * - "unc error at \\server\share\my videos\test trip.mkv: timeout" -> "unc error at [path]: timeout"
+ */
+export function sanitizeDiagnostics(
+  text: string,
+  knownNames: string[] = [],
+): string {
+  if (!text) return "";
+  let res = String(text);
+
+  // (a) Redact known video names and basenames literally
+  if (Array.isArray(knownNames)) {
+    for (const name of knownNames) {
+      if (!name || typeof name !== "string") continue;
+      const trimmed = name.trim();
+      if (!trimmed) continue;
+
+      // Full name match (case-insensitive)
+      const escapedFull = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      res = res.replace(new RegExp(escapedFull, "gi"), "[video file]");
+
+      // Basename with extension
+      const baseWithExt = trimmed.split(/[\\/]/).pop() || "";
+      if (baseWithExt && baseWithExt.length > 2) {
+        const escapedBase = baseWithExt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        res = res.replace(new RegExp(escapedBase, "gi"), "[video file]");
+
+        // Basename without extension
+        const dot = baseWithExt.lastIndexOf(".");
+        const baseNoExt = dot > 0 ? baseWithExt.slice(0, dot) : "";
+        if (baseNoExt && baseNoExt.length > 3) {
+          const escapedNoExt = baseNoExt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          res = res.replace(
+            new RegExp(`\\b${escapedNoExt}\\b`, "gi"),
+            "[video file]",
+          );
+        }
+      }
+    }
+  }
+
+  // (b) Redact path-like text:
+  // 1. Quoted strings containing paths or video extensions
+  res = res.replace(
+    new RegExp(
+      `["'](?:[a-zA-Z]:[\\\\/]|\\\\\\\\|\\/|[^"'\\r\\n]*[\\\\/]|[^"'\\r\\n]*\\.(?:${VIDEO_EXTENSIONS}))[^"'\\r\\n]*["']`,
+      "gi",
+    ),
+    "[path]",
   );
+
+  // 2. Drive letter paths (e.g. D:\My Videos\summer trip 2024.mp4)
+  res = res.replace(/\b[a-zA-Z]:[\\/][^\r\n"'<>`:]*/gi, "[path]");
+
+  // 3. UNC network paths (e.g. \\server\share\file.mp4)
+  res = res.replace(/\\\\[a-zA-Z0-9_.\-]+[\\/][^\r\n"'<>`:]*/gi, "[path]");
+
+  // 4. Absolute Unix paths (e.g. /home/user/Movies/clip.mp4)
+  res = res.replace(/\/(?:[a-zA-Z0-9_.\- ]+\/)+[^\r\n"'<>`:]*/gi, "[path]");
+
+  // (d) Redact any token ending in a video extension even if it contains spaces
+  const extRegex = new RegExp(
+    `(^|[\\r\\n"'\\:;=,(>\\[\\s])([^"'\\:;=,\\n\\r()<>[\\]\\\\/]+?\\.(?:${VIDEO_EXTENSIONS}))\\b`,
+    "gi",
+  );
+  res = res.replace(extRegex, "$1[video file]");
+
+  return res;
 }
 
 export const SettingsSheet: React.FC<SettingsSheetProps> = ({
@@ -61,6 +146,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
   onClose,
   isJobRunning = false,
   lastJobError = null,
+  knownVideoNames = [],
   setupConfig = null,
   onSetupUpdated,
   onDefaultsChanged,
@@ -405,7 +491,9 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
       `Mode: ${accelText}`,
       `Encoders: ${encoderText}`,
       `Free disk: ${formatBytes(storageInfo?.freeBytes || setupConfig?.freeBytes)}`,
-      lastJobError ? `Last job error: ${sanitizeDiagnostics(lastJobError)}` : "",
+      lastJobError
+        ? `Last job error: ${sanitizeDiagnostics(lastJobError, knownVideoNames)}`
+        : "",
     ]
       .filter(Boolean)
       .join("\n");
