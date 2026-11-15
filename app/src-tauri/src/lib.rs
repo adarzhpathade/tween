@@ -10,7 +10,11 @@ fn app_version() -> &'static str {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_version])
+        .invoke_handler(tauri::generate_handler![
+            app_version,
+            setup::setup_run,
+            setup::setup_config,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
