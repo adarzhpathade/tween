@@ -16,8 +16,9 @@
         "title": "Tween",
         "width": 1280,
         "height": 820,
-        "minWidth": 1040,
-        "minHeight": 700,
+        "minWidth": 1180,
+        "minHeight": 740,
+        "center": true,
         "decorations": false,
         "backgroundColor": "#0b0b0b"
       }
