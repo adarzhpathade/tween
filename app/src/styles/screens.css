@@ -579,6 +579,7 @@
 .rv.bad .fin {
   color: var(--warn);
   border-bottom-color: var(--warn);
+  caret-color: var(--warn);
 }
 
 .stp {
@@ -672,6 +673,10 @@
   color: var(--mut);
   display: block;
   margin-top: 2px;
+}
+
+.fhint.bad {
+  color: var(--warn);
 }
 
 .fhint.bad .fhint-l2 {
