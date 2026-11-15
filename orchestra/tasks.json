@@ -516,6 +516,54 @@
           "warnings"
         ]
       ]
+    },
+    {
+      "id": "T15",
+      "title": "Plain drop zone; decluttered custom fps editing",
+      "brief": "briefs/T15-simplify.md",
+      "deps": [
+        "T14"
+      ],
+      "checks": [
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "install",
+          "--no-audit",
+          "--no-fund"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "build"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "typecheck"
+        ],
+        [
+          "cargo",
+          "test",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml"
+        ],
+        [
+          "cargo",
+          "clippy",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ]
+      ]
     }
   ]
 }
