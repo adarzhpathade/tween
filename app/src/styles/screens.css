@@ -113,6 +113,17 @@
   backdrop-filter: blur(6px);
 }
 
+.vpill {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  background: var(--text);
+  transition: transform var(--spring-d) var(--spring), width var(--spring-d) var(--spring);
+}
+
 .vsw button {
   position: relative;
   z-index: 1;
@@ -137,7 +148,7 @@
 
 .vsw button.on {
   color: #111;
-  background: var(--text);
+  background: transparent;
 }
 
 /* Trim editor */
@@ -245,12 +256,30 @@
   position: absolute;
   top: -2px;
   bottom: -2px;
-  left: 0;
-  width: 100%;
   border-top: 2px solid var(--acc);
   border-bottom: 2px solid var(--acc);
   background: #a9b79a14;
   pointer-events: none;
+  box-shadow: 0 0 24px -6px var(--acc);
+}
+
+.shade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: #0e0e0ed8;
+  pointer-events: none;
+  transition: none;
+}
+
+#shL {
+  left: 0;
+  border-radius: 3px 0 0 3px;
+}
+
+#shR {
+  right: 0;
+  border-radius: 0 3px 3px 0;
 }
 
 .hdl {
@@ -263,16 +292,107 @@
   display: grid;
   place-items: center;
   z-index: 3;
+  transition: filter .2s;
+}
+
+.hdl::after {
+  content: "";
+  width: 2px;
+  height: 18px;
+  border-radius: 1px;
+  background: #14140f80;
+  box-shadow: 4px 0 0 #14140f80, -4px 0 0 #14140f80;
+  margin: 0;
 }
 
 .hdl.in {
   left: 0;
-  border-radius: 4px 0 0 4px;
+  border-radius: 6px 0 0 6px;
+  transform: translateX(-100%);
 }
 
 .hdl.out {
-  right: 0;
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 6px 6px 0;
+}
+
+.hdl:hover,
+.hdl.drag {
+  filter: brightness(1.12);
+}
+
+.tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--text);
+  color: #111;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s, transform .2s;
+}
+
+.hdl.in .tip {
+  left: calc(100% - 7px);
+}
+
+.hdl.out .tip {
+  left: 7px;
+}
+
+.hdl:hover .tip,
+.hdl.drag .tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.ph {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  width: 1px;
+  background: var(--text);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ph::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -4px;
+  border: 4px solid transparent;
+  border-top-color: var(--text);
+}
+
+.rul {
+  position: relative;
+  height: 16px;
+  margin: 10px 16px 0;
+}
+
+.rul span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--dim);
+}
+
+.rul span::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -6px;
+  height: 4px;
+  width: 1px;
+  background: var(--line2);
 }
 
 /* Frame Rate Rail (column 2 in Ready screen) */
@@ -338,9 +458,23 @@
   border: 0;
   border-radius: 0;
   background: transparent;
+  position: relative;
+}
+
+.fseg.v .pill {
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  right: 0;
+  background: var(--text);
+  border-radius: 0;
+  pointer-events: none;
+  transition: transform var(--spring-d) var(--spring), height var(--spring-d) var(--spring);
 }
 
 .fseg.v button {
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -350,6 +484,7 @@
   color: var(--mut);
   border-bottom: 1px solid var(--line);
   padding: 8px 4px;
+  background: transparent;
 }
 
 .fseg.v button:last-of-type {
@@ -371,8 +506,8 @@
 }
 
 .fseg.v button.on {
-  background: var(--text);
   color: #111;
+  background: transparent;
 }
 
 .gainv {
@@ -1403,3 +1538,168 @@
 .cta:hover span {
   transform: translateX(5px);
 }
+
+/* ---------- Ready Screen: Drop zone (Empty state) ---------- */
+.dz {
+  position: relative;
+  border: 1px dashed var(--line2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  transition: border-color .25s, background .25s;
+  background: radial-gradient(circle, #ffffff14 1px, transparent 1.2px) 0 0/22px 22px, var(--bg2);
+}
+
+.dz:hover,
+.dz.over {
+  border-color: var(--acc);
+  background: radial-gradient(circle, #a9b79a30 1px, transparent 1.2px) 0 0/22px 22px, var(--bg2);
+}
+
+.dz .cm {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 0 solid #ffffff55;
+}
+
+.dz .cm.a {
+  left: -1px;
+  top: -1px;
+  border-top-width: 1px;
+  border-left-width: 1px;
+}
+
+.dz .cm.b {
+  right: -1px;
+  top: -1px;
+  border-top-width: 1px;
+  border-right-width: 1px;
+}
+
+.dz .cm.c {
+  left: -1px;
+  bottom: -1px;
+  border-bottom-width: 1px;
+  border-left-width: 1px;
+}
+
+.dz .cm.d {
+  right: -1px;
+  bottom: -1px;
+  border-bottom-width: 1px;
+  border-right-width: 1px;
+}
+
+.dzt {
+  font-family: var(--mono);
+  font-weight: 300;
+  font-size: 26px;
+  letter-spacing: -.02em;
+}
+
+.dzs {
+  color: var(--mut);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.dz.sdz {
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  text-align: center;
+}
+
+.dzr {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Empty state dimming & ticks */
+[data-file="none"] .canvas {
+  display: none;
+}
+
+[data-file="none"] .chips {
+  visibility: hidden;
+}
+
+[data-file="none"] .dock,
+[data-file="none"] .tr.trim,
+[data-file="none"] .insp {
+  opacity: 0.36;
+  pointer-events: none;
+}
+
+[data-file="none"] .film,
+[data-file="none"] .hdl,
+[data-file="none"] .shade,
+[data-file="none"] .sel,
+[data-file="none"] .ph,
+[data-file="none"] .rul span {
+  display: none;
+}
+
+[data-file="none"] .rd b {
+  visibility: hidden;
+}
+
+[data-file="none"] .lane {
+  pointer-events: none;
+  background: repeating-linear-gradient(90deg, #ffffff40 0 1px, transparent 1px 72px) 0 50%/100% 56% no-repeat, repeating-linear-gradient(90deg, #ffffff1f 0 1px, transparent 1px 12px) 0 50%/100% 30% no-repeat, var(--bg2);
+}
+
+[data-file="none"] .frail {
+  opacity: 0.36;
+  pointer-events: none;
+}
+
+[data-file="none"] .fmeta {
+  visibility: hidden;
+}
+
+.go.off {
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  cursor: not-allowed;
+}
+
+/* Custom FPS input */
+.custom-fps-input {
+  width: 60px;
+  height: 22px;
+  background: var(--bg);
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: center;
+  margin-top: 2px;
+  padding: 0 4px;
+}
+
+.custom-fps-input:focus {
+  outline: none;
+  border-color: var(--acc);
+}
+
+.quiet-warn {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--warn);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+

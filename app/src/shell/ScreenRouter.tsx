@@ -69,6 +69,7 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
         return stateParam;
       }
       if (stateParam === "empty") return "onboarding";
+      if (stateParam === "open") return "ready";
       if (stateParam === "proc") return "processing";
       if (params.has("step")) return "onboarding";
     }
@@ -156,6 +157,8 @@ export const ScreenRouter: React.FC = () => {
     onboardingStep,
     allowGranted,
   } = useScreen();
+  const [setupCfg, setSetupCfg] = useState<any>(null);
+  const [videoLoaded, setVideoLoaded] = useState<boolean>(false);
 
   // Initialize CSS spring variables once
   useEffect(() => {
@@ -165,7 +168,30 @@ export const ScreenRouter: React.FC = () => {
       "--spring-d",
       `${sp.duration}ms`,
     );
+
+    invoke<any>("setup_config")
+      .then((cfg) => {
+        if (cfg) setSetupCfg(cfg);
+      })
+      .catch(() => {});
   }, []);
+
+  const gpuLabel = setupCfg?.gpu?.name
+    ? `${setupCfg.gpu.name} · Vulkan`
+    : setupCfg?.mode === "cpu"
+    ? "CPU fallback · slow"
+    : undefined;
+
+  const engineLabel = setupCfg?.models?.[0]
+    ? `RIFE ${setupCfg.models[0]}`
+    : undefined;
+
+  const statusLabel =
+    screen === "ready"
+      ? videoLoaded
+        ? "Ready"
+        : "Idle"
+      : undefined;
 
   const renderScreen = () => {
     switch (screen) {
@@ -178,7 +204,7 @@ export const ScreenRouter: React.FC = () => {
           />
         );
       case "ready":
-        return <ReadyScreen onNavigate={setScreen} />;
+        return <ReadyScreen onNavigate={setScreen} onVideoLoaded={setVideoLoaded} />;
       case "processing":
         return <ProcessingScreen onNavigate={setScreen} />;
       case "done":
@@ -187,14 +213,23 @@ export const ScreenRouter: React.FC = () => {
   };
 
   return (
-    <div className="win" data-state={screen}>
+    <div
+      className="win"
+      data-state={screen}
+      data-file={screen === "ready" ? (videoLoaded ? "loaded" : "none") : undefined}
+    >
       <TitleBar title={title} brand="Tween" />
       <AnimatePresence mode="wait">
         <MainGrid key={screen} screen={screen}>
           {renderScreen()}
         </MainGrid>
       </AnimatePresence>
-      <StatusBar screen={screen} />
+      <StatusBar
+        screen={screen}
+        gpu={gpuLabel}
+        engine={engineLabel}
+        status={statusLabel}
+      />
 
       {/* Review switcher control matching mock */}
       <div className="router-switcher" role="navigation" aria-label="Screen switcher">

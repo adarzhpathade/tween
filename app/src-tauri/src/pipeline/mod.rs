@@ -61,6 +61,35 @@ pub async fn probe_video(
 }
 
 #[tauri::command]
+pub async fn extract_frame(
+    app: tauri::AppHandle,
+    path: String,
+    time: Option<f64>,
+) -> Result<String, String> {
+    let cfg = load_or_default_config(&app);
+    probe::extract_frame(&cfg, &path, time).await
+}
+
+#[tauri::command]
+pub async fn pick_video_file() -> Result<Option<String>, String> {
+    let file = rfd::AsyncFileDialog::new()
+        .add_filter("Video", &["mp4", "mkv", "mov", "avi", "webm", "m4v", "wmv", "flv", "ts", "mts", "m2ts", "gif"])
+        .pick_file()
+        .await;
+    Ok(file.map(|f| f.path().to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+pub async fn pick_output_folder(default_path: Option<String>) -> Result<Option<String>, String> {
+    let mut dialog = rfd::AsyncFileDialog::new();
+    if let Some(ref p) = default_path {
+        dialog = dialog.set_directory(p);
+    }
+    let folder = dialog.pick_folder().await;
+    Ok(folder.map(|f| f.path().to_string_lossy().to_string()))
+}
+
+#[tauri::command]
 pub async fn start_job(
     app: tauri::AppHandle,
     state: tauri::State<'_, PipelineState>,
