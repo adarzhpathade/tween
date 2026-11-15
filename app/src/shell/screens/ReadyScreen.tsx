@@ -520,7 +520,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       requestAnimationFrame(() => {
         if (inputRef.current) {
           inputRef.current.focus();
-          inputRef.current.select();
         }
       });
     },
@@ -638,7 +637,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         el.removeEventListener("pointercancel", onUp);
         if (!moved) {
           el.focus();
-          el.select();
         }
       };
 

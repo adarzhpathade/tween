@@ -118,7 +118,7 @@ export function getCustomFpsHint(
   if (v > MAX_FPS) {
     return { text: `MAX ${MAX_FPS}`, isError: true, v };
   }
-  return { text: `${minF}–${MAX_FPS} FPS`, isError: false, v };
+  return { text: `${minF}\u2013${MAX_FPS} FPS`, isError: false, v };
 }
 
 export function checkCustomVal(
