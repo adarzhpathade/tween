@@ -1,7 +1,15 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { AnimatePresence } from "motion/react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { Screen, ScreenContextValue } from "./types";
+import { listen } from "@tauri-apps/api/event";
+import type {
+  Screen,
+  ScreenContextValue,
+  ProbeInfo,
+  JobRequest,
+  JobProgressEvent,
+  JobFinished,
+} from "./types";
 import { SCREEN_TITLES } from "./types";
 import { MainGrid } from "./MainGrid";
 import { TitleBar } from "./TitleBar";
@@ -154,11 +162,110 @@ export const ScreenRouter: React.FC = () => {
     screen,
     setScreen,
     title,
+    setTitle,
     onboardingStep,
     allowGranted,
   } = useScreen();
   const [setupCfg, setSetupCfg] = useState<any>(null);
   const [videoLoaded, setVideoLoaded] = useState<boolean>(false);
+
+  // Pipeline job state
+  const [activeProbe, setActiveProbe] = useState<ProbeInfo | null>(null);
+  const [activeJob, setActiveJob] = useState<JobRequest | null>(null);
+  const [jobProgress, setJobProgress] = useState<JobProgressEvent | null>(null);
+  const [jobFinished, setJobFinished] = useState<JobFinished | null>(null);
+  const [jobError, setJobError] = useState<string | null>(null);
+
+  // Listen to Tauri pipeline events
+  useEffect(() => {
+    if (!isTauri()) return;
+
+    let unsubProgress: (() => void) | undefined;
+    let unsubFinished: (() => void) | undefined;
+
+    listen<JobProgressEvent>("job-progress", (evt) => {
+      setJobProgress(evt.payload);
+    }).then((un) => {
+      unsubProgress = un;
+    });
+
+    listen<JobFinished>("job-finished", (evt) => {
+      const finished = evt.payload;
+      setJobFinished(finished);
+      if (finished.cancelled) {
+        // Cancelled: back to Ready silently
+        setScreen("ready");
+      } else if (finished.ok) {
+        // When the job finishes the app moves to Done by itself
+        setScreen("done");
+      } else {
+        // Errors: show the error text plainly with "Try again" (back to Ready, settings kept)
+        setJobError(finished.error || "Interpolation failed");
+        setScreen("done");
+      }
+    }).then((un) => {
+      unsubFinished = un;
+    });
+
+    return () => {
+      unsubProgress?.();
+      unsubFinished?.();
+    };
+  }, [setScreen]);
+
+  // Start job handler
+  const handleStartJob = async (job: JobRequest) => {
+    setActiveJob(job);
+    setActiveProbe(job.info);
+    setJobProgress({ stage: "analyse", pct: 0 });
+    setJobFinished(null);
+    setJobError(null);
+    setScreen("processing");
+    setTitle(job.info.name);
+
+    if (isTauri()) {
+      try {
+        await invoke("start_job", { job });
+      } catch (err: any) {
+        console.error("start_job failed:", err);
+        const msg = typeof err === "string" ? err : err?.message || String(err);
+        setJobError(msg);
+        setJobFinished({ ok: false, error: msg });
+        setScreen("done");
+      }
+    }
+  };
+
+  // Cancel job handler
+  const handleCancelJob = async () => {
+    if (isTauri()) {
+      try {
+        await invoke("cancel_job");
+      } catch (err) {
+        console.warn("cancel_job error:", err);
+      }
+    }
+    setScreen("ready");
+  };
+
+  // Interpolate another: back to empty Ready screen
+  const handleInterpolateAnother = () => {
+    setActiveJob(null);
+    setActiveProbe(null);
+    setJobProgress(null);
+    setJobFinished(null);
+    setJobError(null);
+    setVideoLoaded(false);
+    setScreen("ready");
+  };
+
+  // Try again: back to Ready screen with settings kept
+  const handleTryAgain = () => {
+    setJobProgress(null);
+    setJobFinished(null);
+    setJobError(null);
+    setScreen("ready");
+  };
 
   // Initialize CSS spring variables once
   useEffect(() => {
@@ -191,7 +298,24 @@ export const ScreenRouter: React.FC = () => {
       ? videoLoaded
         ? "Ready"
         : "Idle"
+      : screen === "processing"
+      ? "Interpolating…"
+      : screen === "done"
+      ? "Finished"
       : undefined;
+
+  const displayTitle =
+    screen === "onboarding"
+      ? "Welcome"
+      : screen === "ready"
+      ? videoLoaded && activeProbe
+        ? activeProbe.name
+        : "Tween"
+      : screen === "processing"
+      ? activeProbe?.name || "Processing"
+      : screen === "done"
+      ? activeProbe?.name || "Finished"
+      : title;
 
   const renderScreen = () => {
     switch (screen) {
@@ -204,11 +328,38 @@ export const ScreenRouter: React.FC = () => {
           />
         );
       case "ready":
-        return <ReadyScreen onNavigate={setScreen} onVideoLoaded={setVideoLoaded} />;
+        return (
+          <ReadyScreen
+            initialProbe={activeProbe}
+            onNavigate={setScreen}
+            onVideoLoaded={setVideoLoaded}
+            onStartJob={handleStartJob}
+          />
+        );
       case "processing":
-        return <ProcessingScreen onNavigate={setScreen} />;
+        return (
+          <ProcessingScreen
+            probeInfo={activeProbe}
+            jobRequest={activeJob}
+            jobProgress={jobProgress}
+            gpuName={setupCfg?.gpu?.name}
+            onCancel={handleCancelJob}
+            onNavigate={setScreen}
+          />
+        );
       case "done":
-        return <DoneScreen onNavigate={setScreen} />;
+        return (
+          <DoneScreen
+            probeInfo={activeProbe}
+            jobRequest={activeJob}
+            jobFinished={jobFinished}
+            error={jobError}
+            modelName={activeJob?.model}
+            onTryAgain={handleTryAgain}
+            onInterpolateAnother={handleInterpolateAnother}
+            onNavigate={setScreen}
+          />
+        );
     }
   };
 
@@ -218,7 +369,7 @@ export const ScreenRouter: React.FC = () => {
       data-state={screen}
       data-file={screen === "ready" ? (videoLoaded ? "loaded" : "none") : undefined}
     >
-      <TitleBar title={title} brand="Tween" />
+      <TitleBar title={displayTitle} brand="Tween" />
       <AnimatePresence mode="wait">
         <MainGrid key={screen} screen={screen}>
           {renderScreen()}

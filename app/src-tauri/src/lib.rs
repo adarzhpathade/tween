@@ -12,6 +12,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(pipeline::PipelineState::new())
+        .manage(pipeline::SystemMonitorState::new())
         .invoke_handler(tauri::generate_handler![
             app_version,
             setup::setup_run,
@@ -22,7 +23,9 @@ pub fn run() {
             pipeline::pick_video_file,
             pipeline::pick_output_folder,
             pipeline::start_job,
-            pipeline::cancel_job
+            pipeline::cancel_job,
+            pipeline::stats::sample_system_stats,
+            pipeline::stats::show_in_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
