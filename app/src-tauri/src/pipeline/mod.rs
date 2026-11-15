@@ -275,19 +275,19 @@ mod tests {
             let pos = global_positions(count, p, q, chunk);
             let plan = plan_chunks(count, p, q, chunk);
             let last_start = plan.chunks.last().unwrap().out_offset;
-            for k in 0..pos.len() {
+            for (k, &pk) in pos.iter().enumerate() {
                 let exact = (k as f64) * (q as f64) / (p as f64);
                 if k < last_start {
                     assert!(
-                        (pos[k] - exact).abs() < 1e-3,
+                        (pk - exact).abs() < 1e-3,
                         "case ({}, {}, {}, {}): frame {}: {} vs exact {}",
-                        count, p, q, chunk, k, pos[k], exact
+                        count, p, q, chunk, k, pk, exact
                     );
-                } else if pos[k] < (count as f64) - 1.0 {
+                } else if pk < (count as f64) - 1.0 {
                     assert!(
-                        (pos[k] - exact).abs() < 0.5,
+                        (pk - exact).abs() < 0.5,
                         "case ({}, {}, {}, {}): tail frame {}: {} vs exact {}",
-                        count, p, q, chunk, k, pos[k], exact
+                        count, p, q, chunk, k, pk, exact
                     );
                 } else {
                     assert!(

@@ -17,6 +17,12 @@ pub struct SystemStats {
 
 pub struct SystemMonitorState(pub Arc<Mutex<sysinfo::System>>);
 
+impl Default for SystemMonitorState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SystemMonitorState {
     pub fn new() -> Self {
         let mut sys = sysinfo::System::new_all().expect("failed to init sysinfo");
