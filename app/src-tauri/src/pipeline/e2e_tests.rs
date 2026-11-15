@@ -884,6 +884,7 @@ async fn test_e2e_variable_frame_rate() {
         let clip = work.join("clip_vfr.mp4");
         // Make a VFR clip by selectively dropping frames with PTS jitter
         let mut gen_cmd = tokio::process::Command::new("ffmpeg");
+        let (fps_flag, fps_val) = runner::fps_mode_args("ffmpeg", "vfr");
         gen_cmd.args([
             "-y",
             "-v",
@@ -898,8 +899,8 @@ async fn test_e2e_variable_frame_rate() {
             "sine=frequency=440:duration=5",
             "-vf",
             "select='not(eq(mod(n\\,5)\\,0))',setpts=PTS-STARTPTS",
-            "-fps_mode",
-            "vfr",
+            fps_flag,
+            fps_val,
             "-c:v",
             "libx264",
             "-c:a",

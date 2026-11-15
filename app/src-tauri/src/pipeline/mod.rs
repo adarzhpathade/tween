@@ -23,7 +23,10 @@ pub use plan::{
     rife_threads,
 };
 pub use probe::{colour_of, probe};
-pub use runner::{kill_tree, resolve_temp_root, run_pipeline};
+pub use runner::{
+    fps_mode_args, fps_mode_args_for_support, kill_tree, parse_ffmpeg_version, resolve_temp_root,
+    run_pipeline, version_supports_fps_mode,
+};
 pub use splitter::PngSplitter;
 pub use stats::{sample_system_stats, show_in_folder, SystemMonitorState, SystemStats};
 pub use types::{
