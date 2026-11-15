@@ -231,12 +231,18 @@ async function worker(id) {
     }
     fs.writeFileSync(path.join(rd, `checks-${attempt}.log`), clog);
 
-    const agyOk = code === 0 && result?.status === 'SUCCESS';
-    const reason = !agyOk ? `agy ${result?.status || 'exit ' + code}: ${(result?.error?.message || result?.error || errTail.trim().split('\n').pop() || '').toString().slice(0, 200)}`
+    const agyErr = (result?.error?.message || result?.error || errTail.trim().split('\n').pop() || '').toString().slice(0, 200);
+    // agy can return ERROR after the worker already gave its full reply (a trailing API call failed).
+    // That work is real: if the reply has the required sections, let the reviewer judge it.
+    const completeReply = /^## Done\b/m.test(result?.response || '') && /^## Questions\b/m.test(result?.response || '');
+    const lateError = result?.status === 'ERROR' && completeReply;
+    const agyOk = (code === 0 && result?.status === 'SUCCESS') || lateError;
+    const reason = !agyOk ? `agy ${result?.status || 'exit ' + code}: ${agyErr}`
       : !commits ? (denials ? 'no changes: edits were permission-denied (dispatch with --auto-approve)' : 'worker made no changes')
         : !checks.passed ? 'acceptance checks failed' : null;
     writeState(id, {
       status: reason ? 'failed' : 'review', reason, finishedAt: now(), exitCode: code, agyStatus: result?.status || null,
+      agyWarning: lateError ? `agy reported ERROR after the complete reply: ${agyErr}` : null,
       conversationId: conv, checks, commits, summary: (result?.response || '').slice(0, 4000), usage: result?.usage || null,
       feedback: reason ? s.feedback : null, workerPid: null, agyPid: null,
     });
@@ -250,6 +256,7 @@ function review(id) {
   const t = taskById(id), s = readState(id);
   const n = s.attempts || 0;
   console.log(`# ${id} ${t.title} — ${s.status}${s.reason ? ' (' + s.reason + ')' : ''}, attempt ${n}, ${s.commits || 0} commit(s)\n`);
+  if (s.agyWarning) console.log(`Note: ${s.agyWarning}\n`);
   console.log(tryGit(['diff', '--stat', `${BASE}...task/${id}`]) || '(no diff)');
   console.log('\n## Checks'); for (const r of s.checks?.results || []) console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.cmd}`);
   console.log(`  full log: ${path.relative(ROOT, path.join(runDir(id), `checks-${n}.log`))}`);

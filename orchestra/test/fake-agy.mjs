@@ -17,4 +17,5 @@ else {
   execFileSync('git', ['commit', '-qm', `${id}: fake work${fb}`]);
 }
 await new Promise((r) => setTimeout(r, 300));
-out({ event: 'result', result: { conversation_id: conv, status: 'SUCCESS', response: `## Done\n- wrote work-${id}.txt\n## Checks\n- ok\n## Not done / risks\n- none\n## Questions\n- none`, duration_seconds: 0.3, num_turns: 1, usage: { total_tokens: 1 } } });
+out({ event: 'result', result: { conversation_id: conv, status: process.env.FAKE_AGY_MODE === 'lateerror' ? 'ERROR' : 'SUCCESS',
+  ...(process.env.FAKE_AGY_MODE === 'lateerror' ? { error: { message: 'dial tcp: lookup example: no such host' } } : {}), response: `## Done\n- wrote work-${id}.txt\n## Checks\n- ok\n## Not done / risks\n- none\n## Questions\n- none`, duration_seconds: 0.3, num_turns: 1, usage: { total_tokens: 1 } } });

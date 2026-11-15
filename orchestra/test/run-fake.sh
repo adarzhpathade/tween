@@ -35,4 +35,8 @@ step "C now ready"; $O status
 step "read-only worker (no write)"; FAKE_AGY_MODE=nowrite $O dispatch
 node orchestra/watcher.mjs --interval 1s --max-wait 60s || true
 $O status
+step "late agy ERROR after a complete reply goes to review"
+$O reset C >/dev/null; FAKE_AGY_MODE=lateerror $O dispatch --auto-approve
+node orchestra/watcher.mjs --interval 1s --max-wait 60s || true
+$O status; $O review C | head -4
 step "main log"; git log --oneline --graph | head -12; ls
