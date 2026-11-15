@@ -15,6 +15,7 @@ pub fn run() {
             app_version,
             setup::setup_run,
             setup::setup_config,
+            setup::open_url,
             pipeline::probe_video,
             pipeline::start_job,
             pipeline::cancel_job

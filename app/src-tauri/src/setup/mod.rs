@@ -139,6 +139,8 @@ pub struct SetupConfig {
     pub devices: Option<Vec<GpuDevice>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoders: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paths_exist: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1518,12 +1520,99 @@ pub fn setup_config(app: tauri::AppHandle) -> Result<Option<SetupConfig>, String
         .app_data_dir()
         .map_err(|e| format!("Could not get app data dir: {e}"))?;
 
-    Ok(load_config(&base_dir))
+    let mut cfg = match load_config(&base_dir) {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+    let ffmpeg_ok = cfg.ffmpeg.as_ref().map(|p| Path::new(p).exists()).unwrap_or(false);
+    let rife_ok = cfg.rife_dir.as_ref().map(|p| Path::new(p).exists()).unwrap_or(false);
+    cfg.paths_exist = Some(ffmpeg_ok && rife_ok);
+    Ok(Some(cfg))
+}
+
+pub fn is_allowed_driver_url(url: &str) -> bool {
+    if !url.starts_with("https://") {
+        return false;
+    }
+    let after_scheme = &url["https://".len()..];
+    let host = match after_scheme.find('/') {
+        Some(idx) => &after_scheme[..idx],
+        None => after_scheme,
+    };
+    if host.is_empty()
+        || host.contains('@')
+        || host.contains(':')
+        || host.contains(' ')
+        || host.contains('?')
+        || host.contains('#')
+        || host.contains('\\')
+    {
+        return false;
+    }
+    let host_lower = host.to_ascii_lowercase();
+    host_lower == "nvidia.com"
+        || host_lower == "www.nvidia.com"
+        || host_lower.ends_with(".nvidia.com")
+        || host_lower == "amd.com"
+        || host_lower == "www.amd.com"
+        || host_lower.ends_with(".amd.com")
+        || host_lower == "intel.com"
+        || host_lower == "www.intel.com"
+        || host_lower.ends_with(".intel.com")
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !is_allowed_driver_url(&url) {
+        return Err("URL not allowed: must be an HTTPS link to an official graphics driver page (nvidia.com, amd.com, intel.com)".to_string());
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("rundll32.exe");
+        cmd.args(["url.dll,FileProtocolHandler", &url]);
+        cmd.creation_flags(0x08000000);
+        cmd.spawn().map_err(|e| format!("Failed to open browser: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {e}"))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_allowed_driver_url() {
+        assert!(is_allowed_driver_url("https://www.nvidia.com/Download/index.aspx"));
+        assert!(is_allowed_driver_url("https://www.amd.com/en/support/download/drivers.html"));
+        assert!(is_allowed_driver_url("https://www.intel.com/content/www/us/en/support/detect.html"));
+        assert!(is_allowed_driver_url("https://nvidia.com/drivers"));
+        assert!(is_allowed_driver_url("https://downloadcenter.intel.com/"));
+
+        assert!(!is_allowed_driver_url("http://www.nvidia.com/Download/index.aspx"));
+        assert!(!is_allowed_driver_url("https://evil.com/www.nvidia.com"));
+        assert!(!is_allowed_driver_url("https://nvidia.com.attacker.com/"));
+        assert!(!is_allowed_driver_url("https://user:pass@www.nvidia.com/"));
+        assert!(!is_allowed_driver_url("https://www.nvidia.com:8080/"));
+        assert!(!is_allowed_driver_url("https://evil.com?https://nvidia.com"));
+        assert!(!is_allowed_driver_url("cmd /c start https://www.nvidia.com"));
+        assert!(!is_allowed_driver_url("file:///C:/Windows/System32/cmd.exe"));
+    }
 
     #[test]
     fn test_parse_vulkan_devices() {
@@ -1585,6 +1674,7 @@ mod tests {
             }),
             devices: Some(vec![]),
             encoders: Some(vec!["hevc_nvenc".to_string()]),
+            paths_exist: None,
         };
 
         save_config(&tmp, &cfg).expect("save_config should succeed");

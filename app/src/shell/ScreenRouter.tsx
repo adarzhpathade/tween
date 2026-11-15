@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { AnimatePresence } from "motion/react";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { Screen, ScreenContextValue } from "./types";
 import { SCREEN_TITLES } from "./types";
 import { MainGrid } from "./MainGrid";
@@ -10,10 +11,17 @@ import { ReadyScreen } from "./screens/ReadyScreen";
 import { ProcessingScreen } from "./screens/ProcessingScreen";
 import { DoneScreen } from "./screens/DoneScreen";
 import { springEase } from "../motion";
+import type { SetupConfig } from "./setupTypes";
 
-const ScreenContext = createContext<ScreenContextValue | null>(null);
+interface ScreenContextExtendedValue extends ScreenContextValue {
+  onboardingStep?: number;
+  setOnboardingStep: (step: number) => void;
+  allowGranted: boolean;
+}
 
-export function useScreen(): ScreenContextValue {
+const ScreenContext = createContext<ScreenContextExtendedValue | null>(null);
+
+export function useScreen(): ScreenContextExtendedValue {
   const ctx = useContext(ScreenContext);
   if (!ctx) {
     throw new Error("useScreen must be used within a ScreenProvider");
@@ -30,6 +38,24 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
   initialScreen = "onboarding",
   children,
 }) => {
+  const [onboardingStep, setOnboardingStep] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search);
+      const s = p.get("step");
+      if (s !== null && !isNaN(Number(s))) {
+        return Math.min(2, Math.max(0, Number(s)));
+      }
+    }
+    return 0;
+  });
+
+  const [allowGranted] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return /allow=1/.test(window.location.search);
+    }
+    return false;
+  });
+
   const [screen, setScreen] = useState<Screen>(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -44,11 +70,40 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
       }
       if (stateParam === "empty") return "onboarding";
       if (stateParam === "proc") return "processing";
+      if (params.has("step")) return "onboarding";
     }
     return initialScreen;
   });
 
   const [title, setTitle] = useState<string>(() => SCREEN_TITLES[screen]);
+
+  // On later launches: if setup_config returns saved config, skip onboarding.
+  // If saved paths no longer exist, show page 2 again.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const hasExplicit = params.has("state") || params.has("step");
+    if (hasExplicit) return;
+
+    if (isTauri()) {
+      invoke<SetupConfig | null>("setup_config")
+        .then((cfg) => {
+          if (cfg) {
+            if (cfg.pathsExist === false) {
+              // Saved paths no longer exist: show page 2 again
+              setScreen("onboarding");
+              setOnboardingStep(1);
+            } else {
+              // Saved config exists and paths are valid: skip onboarding
+              setScreen("ready");
+            }
+          }
+        })
+        .catch((err) => {
+          console.warn("setup_config check error:", err);
+        });
+    }
+  }, []);
 
   useEffect(() => {
     setTitle(SCREEN_TITLES[screen]);
@@ -77,14 +132,30 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
   }, [screen]);
 
   return (
-    <ScreenContext.Provider value={{ screen, setScreen, title, setTitle }}>
+    <ScreenContext.Provider
+      value={{
+        screen,
+        setScreen,
+        title,
+        setTitle,
+        onboardingStep,
+        setOnboardingStep,
+        allowGranted,
+      }}
+    >
       {children}
     </ScreenContext.Provider>
   );
 };
 
 export const ScreenRouter: React.FC = () => {
-  const { screen, setScreen, title } = useScreen();
+  const {
+    screen,
+    setScreen,
+    title,
+    onboardingStep,
+    allowGranted,
+  } = useScreen();
 
   // Initialize CSS spring variables once
   useEffect(() => {
@@ -99,7 +170,13 @@ export const ScreenRouter: React.FC = () => {
   const renderScreen = () => {
     switch (screen) {
       case "onboarding":
-        return <OnboardingScreen onNavigate={setScreen} />;
+        return (
+          <OnboardingScreen
+            onNavigate={setScreen}
+            initialStep={onboardingStep}
+            initialAllow={allowGranted}
+          />
+        );
       case "ready":
         return <ReadyScreen onNavigate={setScreen} />;
       case "processing":
