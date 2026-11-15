@@ -69,6 +69,7 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
         return stateParam;
       }
       if (stateParam === "empty") return "onboarding";
+      if (stateParam === "open") return "ready";
       if (stateParam === "proc") return "processing";
       if (params.has("step")) return "onboarding";
     }

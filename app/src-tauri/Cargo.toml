@@ -21,6 +21,9 @@ flate2 = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time", "process", "net", "sync"] }
 futures-util = "0.3"
 regex = "1.10"
+tauri-plugin-dialog = "2"
+base64 = "0.22"
+rfd = "0.17"
 
 [profile.release]
 codegen-units = 1

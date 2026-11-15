@@ -253,3 +253,67 @@ pub async fn probe(cfg: &PipelineConfig, file: &str) -> Result<ProbeInfo, String
         size,
     })
 }
+
+pub async fn extract_frame(
+    cfg: &PipelineConfig,
+    file: &str,
+    time: Option<f64>,
+) -> Result<String, String> {
+    let t = time.unwrap_or(0.0);
+    let time_str = format!("{:.3}", t);
+    let mut cmd = tokio::process::Command::new(&cfg.ffmpeg);
+    cmd.args([
+        "-ss",
+        &time_str,
+        "-i",
+        file,
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
+        "pipe:1",
+    ]);
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output().await.map_err(|e| format!("ffmpeg failed: {e}"))?;
+
+    let stdout = if output.status.success() && !output.stdout.is_empty() {
+        output.stdout
+    } else {
+        let mut fb = tokio::process::Command::new(&cfg.ffmpeg);
+        fb.args([
+            "-i",
+            file,
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "pipe:1",
+        ]);
+        #[cfg(target_os = "windows")]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            fb.creation_flags(CREATE_NO_WINDOW);
+        }
+        let fb_out = fb.output().await.map_err(|e| format!("ffmpeg fallback failed: {e}"))?;
+        if !fb_out.status.success() || fb_out.stdout.is_empty() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("ffmpeg extract frame failed: {}", err.trim()));
+        }
+        fb_out.stdout
+    };
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&stdout);
+    Ok(format!("data:image/jpeg;base64,{}", b64))
+}
+
