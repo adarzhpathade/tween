@@ -25,7 +25,13 @@ const dur = (s) => { const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/.exec(String(s)); i
 const INTERVAL = dur(opt('--interval', '5s')), STALL = dur(opt('--stall', TASKS.stallAfter || '15m')), MAXWAIT = dur(opt('--max-wait', '9m'));
 
 const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
-const read = (id) => { try { return JSON.parse(fs.readFileSync(path.join(HERE, 'runs', id, 'state.json'), 'utf8')); } catch { return { status: 'pending' }; } };
+const cache = {};
+// Read without holding the file open longer than needed; on a collision with a write, use the last good copy.
+const read = (id) => {
+  const f = path.join(HERE, 'runs', id, 'state.json');
+  if (!fs.existsSync(f)) return { status: 'pending' };
+  try { return (cache[id] = JSON.parse(fs.readFileSync(f, 'utf8'))); } catch { return cache[id] || { status: 'pending' }; }
+};
 const orch = (...a) => spawnSync(process.execPath, [path.join(HERE, 'orchestrator.mjs'), ...a], { cwd: ROOT, encoding: 'utf8' });
 
 function snapshot() {

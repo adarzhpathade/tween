@@ -49,17 +49,37 @@ const runDir = (id) => path.join(RUNS, id);
 const wtDir = (id) => path.join(WT, id);
 const die = (m) => { console.error(m); process.exit(1); };
 
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const TRANSIENT = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
 function readState(id) {
-  try { return JSON.parse(fs.readFileSync(path.join(runDir(id), 'state.json'), 'utf8')); } catch { return { id, status: 'pending', attempts: 0 }; }
+  const f = path.join(runDir(id), 'state.json');
+  if (!fs.existsSync(f)) return { id, status: 'pending', attempts: 0 };
+  // On Windows a read can collide with a write in progress; retry instead of guessing "pending".
+  for (let i = 0; i < 20; i++) {
+    try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { if (i === 19) throw e; pause(25); }
+  }
 }
 function writeState(id, patch) {
   fs.mkdirSync(runDir(id), { recursive: true });
   const s = { ...readState(id), ...patch, updatedAt: now() };
   const f = path.join(runDir(id), 'state.json');
-  fs.writeFileSync(f + '.tmp', JSON.stringify(s, null, 2));
-  fs.renameSync(f + '.tmp', f);
-  return s;
+  const body = JSON.stringify(s, null, 2);
+  fs.writeFileSync(f + '.tmp', body);
+  // Windows refuses to rename over a file another process (the watcher) has open: retry, then write in place.
+  for (let i = 0; ; i++) {
+    try { fs.renameSync(f + '.tmp', f); return s; }
+    catch (e) {
+      if (!TRANSIENT.has(e.code)) throw e;
+      if (i < 20) { pause(25 + i * 10); continue; }
+      fs.writeFileSync(f, body);
+      try { fs.rmSync(f + '.tmp', { force: true }); } catch { /* ignore */ }
+      return s;
+    }
+  }
 }
+// Progress heartbeats must never kill a worker.
+function writeStateSoft(id, patch) { try { writeState(id, patch); } catch (e) { console.error(`state write skipped: ${e.code || e.message}`); } }
 const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 function killTree(pid) {
   if (!pid) return;
@@ -171,7 +191,7 @@ async function worker(id) {
     s = writeState(id, { status: 'running', attempts: attempt, workerPid: process.pid, branch, worktree: wt, startedAt: now() });
 
     const child = spawn(AGY, [...AGY_CMD.slice(1), ...a], { cwd: wt, windowsHide: true, shell: false });
-    writeState(id, { agyPid: child.pid });
+    writeStateSoft(id, { agyPid: child.pid });
     let buf = '', result = null, conv = null, steps = 0, lastTool = null, denials = 0, lastWrite = 0;
     child.stdout.on('data', (d) => {
       ev.write(d);
@@ -182,7 +202,7 @@ async function worker(id) {
         if (e.event === 'init') conv = e.conversation_id;
         if (e.event === 'step_update') { steps = Math.max(steps, (e.step_update.step_index || 0) + 1); if (e.step_update.tool_name) lastTool = e.step_update.tool_name; }
         if (e.event === 'result') result = e.result;
-        if (Date.now() - lastWrite > 2000) { lastWrite = Date.now(); writeState(id, { lastEventAt: now(), steps, lastTool, conversationId: conv }); }
+        if (Date.now() - lastWrite > 2000) { lastWrite = Date.now(); writeStateSoft(id, { lastEventAt: now(), steps, lastTool, conversationId: conv }); }
       }
     });
     let errTail = '';
