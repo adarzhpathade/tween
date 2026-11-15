@@ -708,6 +708,102 @@
           "warnings"
         ]
       ]
+    },
+    {
+      "id": "T19",
+      "title": "Speed quick wins + GPU benchmark (npm run bench)",
+      "brief": "briefs/T19-speed-quick.md",
+      "deps": [
+        "T17"
+      ],
+      "checks": [
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "install",
+          "--no-audit",
+          "--no-fund"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "build"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "typecheck"
+        ],
+        [
+          "cargo",
+          "test",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml"
+        ],
+        [
+          "cargo",
+          "clippy",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ]
+      ]
+    },
+    {
+      "id": "T20",
+      "title": "Streaming RIFE engine (no disk, model loaded once) with fallback",
+      "brief": "briefs/T20-stream-engine.md",
+      "deps": [
+        "T19"
+      ],
+      "checks": [
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "install",
+          "--no-audit",
+          "--no-fund"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "build"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "typecheck"
+        ],
+        [
+          "cargo",
+          "test",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml"
+        ],
+        [
+          "cargo",
+          "clippy",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ]
+      ]
     }
   ]
 }
