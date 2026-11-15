@@ -37,6 +37,12 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
   onCancel,
   onNavigate,
 }) => {
+  const isMock = Boolean(
+    import.meta.env.DEV &&
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("mock") === "1"
+  );
+
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const lastPreviewUpdateRef = useRef<number>(0);
@@ -111,7 +117,7 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
   }, [onCancel, onNavigate]);
 
   // Current stage calculation
-  const stage = jobProgress?.stage || "interpolate";
+  const stage = jobProgress?.stage || (isMock ? "interpolate" : "analyse");
   const stageIndex = stage === "analyse" ? 0 : stage === "interpolate" ? 1 : 2;
 
   // Progress percentage calculation across stages
@@ -127,18 +133,19 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
     } else {
       overallPercent = 100;
     }
-  } else if (!jobProgress) {
-    // Fallback for mock review (?state=proc)
+  } else if (isMock) {
     overallPercent = 42;
   } else {
-    overallPercent = stageIndex === 0 ? 5 : stageIndex === 1 ? 50 : 90;
+    overallPercent = 0;
   }
 
   // Display values
-  const fileName = probeInfo?.name || jobRequest?.info.name || "beach_sunset_24fps.mp4";
+  const fileName = probeInfo?.name || jobRequest?.info.name || (isMock ? "beach_sunset_24fps.mp4" : "—");
   const fmeta = probeInfo
     ? `${probeInfo.width}×${probeInfo.height} · ${Math.round(probeInfo.fps)} fps · ${fmtDuration(probeInfo.duration)} · ${formatCodec(probeInfo.codec)}${probeInfo.hasAudio ? " · AAC" : ""} · ${probeInfo.frames.toLocaleString()} frames`
-    : "1920×1080 · 24 fps · 0:42 · H.264 · AAC · 1,008 frames";
+    : isMock
+    ? "1920×1080 · 24 fps · 0:42 · H.264 · AAC · 1,008 frames"
+    : null;
 
   const framesProcessed = jobProgress?.done;
   const framesTotal = jobProgress?.total;
@@ -147,42 +154,59 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
       ? `${framesProcessed.toLocaleString()} / ${framesTotal.toLocaleString()} frames`
       : probeInfo
       ? `${probeInfo.frames.toLocaleString()} frames`
-      : !jobProgress
+      : isMock
       ? "1,058 / 2,016 frames"
-      : "Preparing frames…";
+      : "—";
 
-  const elapsedText = !jobProgress && elapsedSec < 2 ? "0:41" : fmtDuration(elapsedSec);
+  const elapsedText = isMock && elapsedSec < 2 ? "0:41" : fmtDuration(elapsedSec);
   const leftText =
     jobProgress?.eta != null
       ? fmtDuration(jobProgress.eta)
-      : !jobProgress
+      : isMock
       ? "0:57"
       : "—";
+
+  // Real speed computed from real progress events (or frames done / elapsed), showing em dash until first real value
+  let realSpeed: number | null = null;
+  if (jobProgress?.speed != null && jobProgress.speed > 0) {
+    realSpeed = jobProgress.speed;
+  } else if (jobProgress?.done != null && elapsedSec > 0) {
+    realSpeed = jobProgress.done / elapsedSec;
+  }
+
   const speedText =
-    jobProgress?.speed != null
-      ? `${Math.round(jobProgress.speed)} fps`
-      : !jobProgress
+    realSpeed != null
+      ? `${Math.round(realSpeed)} fps`
+      : isMock
       ? "38 fps"
       : "—";
 
   // Real GPU data
-  const hasRealGpu = stats?.gpuUsage != null;
-  const gpuUsageVal = stats?.gpuUsage != null ? Math.round(stats.gpuUsage) : 0;
-  const gpuLabel = gpuName || (stats?.gpuMemoryTotal ? "GPU" : "RTX 4050");
+  const hasRealGpu = stats?.gpuUsage != null || isMock;
+  const gpuUsageVal = stats?.gpuUsage != null ? Math.round(stats.gpuUsage) : isMock ? 92 : 0;
+  const gpuLabel = gpuName || (stats?.gpuMemoryTotal ? "GPU" : isMock ? "RTX 4050" : "—");
   const gpuMemText =
     stats?.gpuMemoryUsed != null && stats?.gpuMemoryTotal != null
       ? `${fmtBytesGb(stats.gpuMemoryUsed)} / ${fmtBytesGb(stats.gpuMemoryTotal)} GB`
       : stats?.gpuMemoryUsed != null
       ? `${fmtBytesGb(stats.gpuMemoryUsed)} GB`
+      : isMock
+      ? "4.1 / 6 GB"
       : null;
 
   // Real CPU data
-  const hasRealCpu = stats?.cpuUsage != null;
-  const cpuUsageVal = stats?.cpuUsage != null ? Math.round(stats.cpuUsage) : 0;
-  const cpuThreadsText = stats?.cpuThreads ? `${stats.cpuThreads} threads` : undefined;
+  const hasRealCpu = stats?.cpuUsage != null || isMock;
+  const cpuUsageVal = stats?.cpuUsage != null ? Math.round(stats.cpuUsage) : isMock ? 34 : 0;
+  const cpuThreadsText = stats?.cpuThreads
+    ? `${stats.cpuThreads} threads`
+    : isMock
+    ? "8 threads"
+    : undefined;
   const ramText =
     stats?.ramUsed != null && stats?.ramTotal != null
       ? `RAM ${fmtBytesGb(stats.ramUsed)} / ${fmtBytesGb(stats.ramTotal)} GB`
+      : isMock
+      ? "RAM 6.2 / 16 GB"
       : null;
 
   return (
@@ -192,7 +216,7 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
           <div>
             <span className="lbl" id="fhLbl">01 · Source</span>
             <h2 id="fhName">{fileName}</h2>
-            <div className="fmeta" id="fhMeta">{fmeta}</div>
+            {fmeta ? <div className="fmeta" id="fhMeta">{fmeta}</div> : null}
             {jobProgress?.note ? (
               <div
                 className="fmeta"

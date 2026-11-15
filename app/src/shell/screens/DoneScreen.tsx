@@ -43,6 +43,12 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
   onShowInFolder,
   onNavigate,
 }) => {
+  const isMock = Boolean(
+    import.meta.env.DEV &&
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("mock") === "1"
+  );
+
   const [view, setView] = useState<"orig" | "res">("res");
   const origVideoRef = useRef<HTMLVideoElement>(null);
   const resVideoRef = useRef<HTMLVideoElement>(null);
@@ -152,54 +158,87 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
   const isError = Boolean(error || (jobFinished && !jobFinished.ok && !jobFinished.cancelled));
   const errorMessage = error || jobFinished?.error || "Interpolation failed";
 
-  // Data formatting
-  const sourceFps = probeInfo?.fps || jobRequest?.info.fps || 24;
-  let targetFps: number;
+  // Data formatting without fake fallbacks
+  const sourceFps = probeInfo?.fps || jobRequest?.info.fps || (isMock ? 24 : null);
+  let targetFps: number | null = null;
   if (jobRequest?.target) {
     if (jobRequest.target.mode === "multiplier") {
-      targetFps = Math.round(sourceFps * (Number(jobRequest.target.value) || 2));
+      targetFps = sourceFps ? Math.round(sourceFps * (Number(jobRequest.target.value) || 2)) : null;
     } else {
       targetFps = Math.round(Number(jobRequest.target.value) || 48);
     }
-  } else {
+  } else if (isMock) {
     targetFps = 48;
   }
 
   const outFileName = resFile
-    ? resFile.split(/[\\/]/).pop() || "beach_sunset_48fps.mp4"
-    : "beach_sunset_48fps.mp4";
+    ? resFile.split(/[\\/]/).pop() || "—"
+    : isMock
+    ? "beach_sunset_48fps.mp4"
+    : "—";
 
   const savedFolderPath = resFile
     ? resFile.replace(/[\\/][^\\/]+$/, "")
-    : "D:\\Videos\\Flowmotion";
+    : isMock
+    ? "D:\\Videos\\Flowmotion"
+    : "—";
 
   const sizeText =
     jobFinished?.outSize != null
       ? fmtBytesMb(jobFinished.outSize)
       : probeInfo?.size != null
       ? fmtBytesMb(probeInfo.size)
-      : "38 MB";
+      : isMock
+      ? "38 MB"
+      : "—";
 
   const resolutionText = probeInfo
     ? `${probeInfo.width}×${probeInfo.height}`
-    : "1920×1080";
+    : isMock
+    ? "1920×1080"
+    : "—";
 
-  const sourceFrames = probeInfo?.frames || jobRequest?.info.frames || 1008;
+  const sourceFrames = probeInfo?.frames || jobRequest?.info.frames || (isMock ? 1008 : null);
   const outFrames =
-    jobFinished?.frames || (targetFps && sourceFps ? Math.round(sourceFrames * (targetFps / sourceFps)) : 2016);
+    jobFinished?.frames != null
+      ? jobFinished.frames
+      : targetFps && sourceFps && sourceFrames
+      ? Math.round(sourceFrames * (targetFps / sourceFps))
+      : isMock
+      ? 2016
+      : null;
 
-  const durationSec = probeInfo?.duration || 42;
+  const durationSec = probeInfo?.duration || (isMock ? 42 : null);
   const fmeta = probeInfo
-    ? `${probeInfo.width}×${probeInfo.height} · ${Math.round(probeInfo.fps)} fps · ${fmtDuration(durationSec)} · ${formatCodec(probeInfo.codec)}${probeInfo.hasAudio ? " · AAC" : ""} · ${sourceFrames.toLocaleString()} frames`
-    : "1920×1080 · 24 fps · 0:42 · H.264 · AAC · 1,008 frames";
+    ? `${probeInfo.width}×${probeInfo.height} · ${Math.round(probeInfo.fps)} fps · ${durationSec != null ? fmtDuration(durationSec) : "—"} · ${formatCodec(probeInfo.codec)}${probeInfo.hasAudio ? " · AAC" : ""} · ${sourceFrames?.toLocaleString() ?? "—"} frames`
+    : isMock
+    ? "1920×1080 · 24 fps · 0:42 · H.264 · AAC · 1,008 frames"
+    : null;
 
-  const timeTakenStr = jobFinished?.seconds != null ? fmtDuration(jobFinished.seconds) : "0:58";
+  const headerFileName = probeInfo?.name || (isMock ? "beach_sunset_24fps.mp4" : "—");
+
+  const timeTakenStr =
+    jobFinished?.seconds != null
+      ? fmtDuration(jobFinished.seconds)
+      : isMock
+      ? "0:58"
+      : null;
+
   const avgSpeed =
-    jobFinished?.seconds != null && jobFinished.seconds > 0
+    jobFinished?.seconds != null && jobFinished.seconds > 0 && outFrames != null
       ? Math.round(outFrames / jobFinished.seconds)
-      : 38;
+      : isMock
+      ? 38
+      : null;
 
-  const displayModel = modelName || jobRequest?.model || "Balanced";
+  const resultSubtitle =
+    timeTakenStr != null
+      ? avgSpeed != null
+        ? `in ${timeTakenStr} · ${avgSpeed} fps average`
+        : `in ${timeTakenStr}`
+      : null;
+
+  const displayModel = modelName || jobRequest?.model || (isMock ? "Balanced" : "—");
 
   return (
     <>
@@ -207,8 +246,8 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
         <div className="fh">
           <div>
             <span className="lbl" id="fhLbl">01 · Source</span>
-            <h2 id="fhName">{probeInfo?.name || "beach_sunset_24fps.mp4"}</h2>
-            <div className="fmeta" id="fhMeta">{fmeta}</div>
+            <h2 id="fhName">{headerFileName}</h2>
+            {fmeta ? <div className="fmeta" id="fhMeta">{fmeta}</div> : null}
           </div>
         </div>
 
@@ -261,7 +300,7 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
                   setView("orig");
                 }}
               >
-                Original <small>{Math.round(sourceFps)} fps</small>
+                Original {sourceFps ? <small>{Math.round(sourceFps)} fps</small> : null}
               </button>
               <button
                 ref={resBtnRef}
@@ -272,7 +311,7 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
                   setView("res");
                 }}
               >
-                Interpolated <small id="tagTo">{Math.round(targetFps)} fps</small>
+                Interpolated {targetFps ? <small id="tagTo">{Math.round(targetFps)} fps</small> : null}
               </button>
             </div>
           </div>
@@ -296,9 +335,7 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
             <div className="rok">
               <b>Finished</b>
             </div>
-            <em>
-              in {timeTakenStr} · {avgSpeed} fps average
-            </em>
+            {resultSubtitle ? <em>{resultSubtitle}</em> : null}
           </div>
         )}
 
@@ -318,15 +355,17 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
         <div className="rcell">
           <span className="lbl">Frame rate</span>
           <div className="rfps">
-            <span>{Math.round(sourceFps)}</span>
+            <span>{sourceFps ? Math.round(sourceFps) : "—"}</span>
             <i>→</i>
-            <span className="to">{Math.round(targetFps)}</span>
+            <span className="to">{targetFps ? Math.round(targetFps) : "—"}</span>
             <small>fps</small>
           </div>
           <div className="rrow">
             <span>Frames</span>
             <b>
-              {sourceFrames.toLocaleString()} → {outFrames.toLocaleString()}
+              {sourceFrames != null && outFrames != null
+                ? `${sourceFrames.toLocaleString()} → ${outFrames.toLocaleString()}`
+                : "—"}
             </b>
           </div>
         </div>
