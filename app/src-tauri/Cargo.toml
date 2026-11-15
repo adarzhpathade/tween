@@ -2,7 +2,7 @@
 name = "tween"
 version = "0.1.0"
 description = "Tween"
-authors = ["you"]
+authors = ["Adarsh Pathade"]
 edition = "2021"
 
 [lib]
@@ -23,7 +23,8 @@ futures-util = "0.3"
 regex = "1.10"
 tauri-plugin-dialog = "2"
 base64 = "0.22"
-rfd = "0.17"
+# default features would add xdg-portal, which clashes with tauri-plugin-dialog's gtk3 on Linux
+rfd = { version = "0.17", default-features = false }
 sysinfo = "0.40"
 
 [profile.release]
@@ -32,3 +33,6 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
