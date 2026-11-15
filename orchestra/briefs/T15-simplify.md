@@ -12,6 +12,7 @@ Build two simplifications that the user approved in `design/app-design-v7-onboar
 
 ## 2. Custom fps editing in the counter
 
+- **No underline under the number while editing** (the user asked for this). Remove the amber bottom border from the custom input, in both the normal and the invalid state, and do not replace it with another line. An invalid value is shown only by the number and the hint line turning `var(--warn)`.
 - Remove the up/down stepper buttons completely: markup, CSS and handlers. Arrow Up/Down (±1), Shift+Arrow (±10) and vertical drag on the number keep working.
 - While editing, the `FPS` label under the number is replaced by **one** short line in the same small mono label style:
   - Valid value: `<min>–240 FPS` (for example `61–240 FPS`), muted.
