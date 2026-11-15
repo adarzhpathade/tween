@@ -1,0 +1,93 @@
+{
+  "project": "Tween (Tauri 2 + Rust + React/TypeScript)",
+  "baseBranch": "main",
+  "maxParallel": 2,
+  "timeout": "60m",
+  "stallAfter": "15m",
+  "tasks": [
+    {
+      "id": "T01",
+      "title": "Scaffold the Tauri 2 app in app/",
+      "brief": "briefs/T01-scaffold.md",
+      "deps": [],
+      "checks": [
+        ["npm", "--prefix", "app", "install", "--no-audit", "--no-fund"],
+        ["npm", "--prefix", "app", "run", "build"],
+        ["cargo", "check", "--manifest-path", "app/src-tauri/Cargo.toml"]
+      ]
+    },
+    {
+      "id": "T02",
+      "title": "Rust setup module: detect, download, self-test",
+      "brief": "briefs/T02-setup-rust.md",
+      "deps": ["T01"],
+      "checks": [
+        ["cargo", "test", "--manifest-path", "app/src-tauri/Cargo.toml", "setup::"],
+        ["cargo", "clippy", "--manifest-path", "app/src-tauri/Cargo.toml", "--", "-D", "warnings"]
+      ]
+    },
+    {
+      "id": "T03",
+      "title": "Rust pipeline: chunked RIFE with scene-cut fix and piped encode",
+      "brief": "briefs/T03-pipeline-rust.md",
+      "deps": ["T01"],
+      "checks": [
+        ["cargo", "test", "--manifest-path", "app/src-tauri/Cargo.toml", "pipeline::"],
+        ["cargo", "clippy", "--manifest-path", "app/src-tauri/Cargo.toml", "--", "-D", "warnings"]
+      ]
+    },
+    {
+      "id": "T04",
+      "title": "UI shell, design tokens and spring motion",
+      "brief": "briefs/T04-ui-shell.md",
+      "deps": ["T01"],
+      "checks": [
+        ["npm", "--prefix", "app", "run", "build"],
+        ["npm", "--prefix", "app", "run", "typecheck"]
+      ]
+    },
+    {
+      "id": "T05",
+      "title": "Onboarding screens wired to setup",
+      "brief": "briefs/T05-onboarding.md",
+      "deps": ["T02", "T04"],
+      "checks": [
+        ["npm", "--prefix", "app", "run", "build"],
+        ["npm", "--prefix", "app", "run", "typecheck"],
+        ["cargo", "check", "--manifest-path", "app/src-tauri/Cargo.toml"]
+      ]
+    },
+    {
+      "id": "T06",
+      "title": "Ready screen: drop, frame-rate strip, settings, trim",
+      "brief": "briefs/T06-ready.md",
+      "deps": ["T03", "T04"],
+      "checks": [
+        ["npm", "--prefix", "app", "run", "build"],
+        ["npm", "--prefix", "app", "run", "typecheck"],
+        ["cargo", "check", "--manifest-path", "app/src-tauri/Cargo.toml"]
+      ]
+    },
+    {
+      "id": "T07",
+      "title": "Processing and Done screens wired to the pipeline",
+      "brief": "briefs/T07-processing-done.md",
+      "deps": ["T06"],
+      "checks": [
+        ["npm", "--prefix", "app", "run", "build"],
+        ["npm", "--prefix", "app", "run", "typecheck"],
+        ["cargo", "test", "--manifest-path", "app/src-tauri/Cargo.toml"]
+      ]
+    },
+    {
+      "id": "T08",
+      "title": "Packaging and CI for Windows, macOS and Linux",
+      "brief": "briefs/T08-packaging.md",
+      "deps": ["T05", "T07"],
+      "checks": [
+        ["npm", "--prefix", "app", "run", "build"],
+        ["cargo", "test", "--manifest-path", "app/src-tauri/Cargo.toml"]
+      ]
+    }
+  ]
+}

@@ -15,8 +15,17 @@ function showError(msg) { const e = $('error'); e.textContent = msg; e.classList
 
 /* ---------- capabilities ---------- */
 async function init() {
-  S.caps = await window.flow.caps();
   const b = $('gpuBadge');
+  // Temporary first-run path until the v7 onboarding is ported: run setup and install what is missing.
+  if (!(await window.flow.setupConfig())) {
+    window.flow.onSetupProgress((it) => {
+      const pct = it.progress != null ? ` ${Math.round(it.progress * 100)}%` : '';
+      b.textContent = `Setup · ${it.label}: ${it.state}${pct}`; b.className = 'badge';
+    });
+    await window.flow.setupRun({ install: true });
+  }
+  S.caps = await window.flow.caps();
+  if (S.caps.models.length && !S.caps.models.some((m) => m.id === S.model)) S.model = S.caps.models[0].id;
   if (!S.caps.engine) { b.textContent = 'Engine missing'; b.className = 'badge warn'; }
   else if (!S.caps.ffmpeg) { b.textContent = 'FFmpeg not found'; b.className = 'badge warn'; }
   else { b.textContent = S.caps.gpu ? `GPU · ${S.caps.gpu}` : 'Vulkan GPU'; b.className = 'badge ok'; }

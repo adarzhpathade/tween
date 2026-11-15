@@ -5,3 +5,9 @@ out/
 *.log
 .DS_Store
 Thumbs.db
+
+# orchestra runtime
+.worktrees/
+orchestra/runs/
+orchestra/STATUS.md
+.tween-task/

@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('flow', {
   caps: () => ipcRenderer.invoke('caps'),
+  setupRun: (opts) => ipcRenderer.invoke('setup-run', opts),
+  setupConfig: () => ipcRenderer.invoke('setup-config'),
+  onSetupProgress: (cb) => ipcRenderer.on('setup-progress', (_e, d) => cb(d)),
+  openLink: (url) => ipcRenderer.invoke('open-link', url),
   pickVideo: () => ipcRenderer.invoke('pick-video'),
   probe: (file) => ipcRenderer.invoke('probe', file),
   pickOutput: (suggested) => ipcRenderer.invoke('pick-output', suggested),

@@ -6,7 +6,9 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/lib/pipeline.js && node --check src/renderer/app.js"
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/lib/pipeline.js && node --check src/renderer/app.js && node --check src/lib/setup.js && node --check src/lib/remotezip.js",
+    "test": "node --test test/pipeline.test.js && node test/e2e-fake.js out/e2e",
+    "test:gpu": "node test/gpu-smoke.js"
   },
   "license": "MIT",
   "devDependencies": {
