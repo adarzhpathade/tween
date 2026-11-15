@@ -2,27 +2,52 @@ import React from "react";
 import type { Screen } from "../types";
 
 export interface ProcessingScreenProps {
+  fileName?: string;
+  stageInfo?: string;
+  progressPercent?: number;
+  framesProcessed?: number;
+  totalFrames?: number;
+  speedFps?: number;
+  elapsedTime?: string;
+  remainingTime?: string;
+  gpuUsage?: number;
+  cpuUsage?: number;
   onNavigate?: (screen: Screen) => void;
+  onCancel?: () => void;
 }
 
 export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
+  fileName,
+  stageInfo,
+  progressPercent,
+  framesProcessed,
+  totalFrames,
+  speedFps,
+  elapsedTime,
+  remainingTime,
+  gpuUsage,
+  cpuUsage,
   onNavigate,
+  onCancel,
 }) => {
+  const handleCancel = () => {
+    onCancel?.();
+    onNavigate?.("ready");
+  };
+
   return (
     <>
       <section className="ws">
         <div className="fh">
           <div>
             <span className="lbl">02 · Processing</span>
-            <h2>beach_sunset_24fps.mp4</h2>
-            <div className="fmeta">
-              Interpolating 24 → 48 fps · Balanced · H.264 NVENC
-            </div>
+            <h2>{fileName ?? "Processing video…"}</h2>
+            {stageInfo ? <div className="fmeta">{stageInfo}</div> : null}
           </div>
           <button
             type="button"
             className="btn pcancel"
-            onClick={() => onNavigate?.("ready")}
+            onClick={handleCancel}
           >
             Cancel <kbd>Esc</kbd>
           </button>
@@ -41,16 +66,20 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
           <div className="pbc big">
             <span className="lbl">Progress</span>
             <div className="pbv">
-              <span>42</span>
-              <small>%</small>
+              <span>{progressPercent != null ? Math.round(progressPercent) : "—"}</span>
+              {progressPercent != null ? <small>%</small> : null}
             </div>
-            <em>1,058 / 2,016 frames</em>
+            <em>
+              {framesProcessed != null && totalFrames != null
+                ? `${framesProcessed.toLocaleString()} / ${totalFrames.toLocaleString()} frames`
+                : "—"}
+            </em>
           </div>
 
           <div className="pbc">
             <span className="lbl">Stage</span>
             <div className="pb-stg">
-              <div className="pbs ok">
+              <div className="pbs">
                 <b>01</b>Extract
               </div>
               <div className="pbs now">
@@ -67,15 +96,15 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
             <div className="pb-tm">
               <div>
                 <span>Elapsed</span>
-                <b>0:41</b>
+                <b>{elapsedTime ?? "—"}</b>
               </div>
               <div>
                 <span>Left</span>
-                <b>0:57</b>
+                <b>{remainingTime ?? "—"}</b>
               </div>
               <div>
                 <span>Speed</span>
-                <b>38 fps</b>
+                <b>{speedFps != null ? `${speedFps} fps` : "—"}</b>
               </div>
             </div>
           </div>
@@ -83,25 +112,25 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
           <div className="pbc">
             <span className="lbl">GPU</span>
             <div className="pbv2">
-              <b>92%</b>
-              <small>RTX 4050</small>
+              <b>{gpuUsage != null ? `${Math.round(gpuUsage)}%` : "—"}</b>
             </div>
-            <div className="pbm">
-              <i style={{ width: "92%" }} />
-            </div>
-            <em>4.1 / 6 GB</em>
+            {gpuUsage != null ? (
+              <div className="pbm">
+                <i style={{ width: `${Math.min(100, Math.max(0, gpuUsage))}%` }} />
+              </div>
+            ) : null}
           </div>
 
           <div className="pbc">
             <span className="lbl">CPU</span>
             <div className="pbv2">
-              <b>34%</b>
-              <small>8 threads</small>
+              <b>{cpuUsage != null ? `${Math.round(cpuUsage)}%` : "—"}</b>
             </div>
-            <div className="pbm">
-              <i style={{ width: "34%" }} />
-            </div>
-            <em>RAM 6.2 / 16 GB</em>
+            {cpuUsage != null ? (
+              <div className="pbm">
+                <i style={{ width: `${Math.min(100, Math.max(0, cpuUsage))}%` }} />
+              </div>
+            ) : null}
           </div>
         </div>
       </aside>

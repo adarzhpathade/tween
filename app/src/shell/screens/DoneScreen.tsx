@@ -2,18 +2,42 @@ import React from "react";
 import type { Screen } from "../types";
 
 export interface DoneScreenProps {
+  fileName?: string;
+  outputPath?: string;
+  fileSize?: string;
+  resolution?: string;
+  sourceFps?: number;
+  targetFps?: number;
+  totalFrames?: number;
+  modelName?: string;
+  elapsedTime?: string;
+  averageSpeed?: number;
+  onShowInFolder?: () => void;
   onNavigate?: (screen: Screen) => void;
 }
 
-export const DoneScreen: React.FC<DoneScreenProps> = ({ onNavigate }) => {
+export const DoneScreen: React.FC<DoneScreenProps> = ({
+  fileName,
+  outputPath,
+  fileSize,
+  resolution,
+  sourceFps,
+  targetFps,
+  totalFrames,
+  modelName,
+  elapsedTime,
+  averageSpeed,
+  onShowInFolder,
+  onNavigate,
+}) => {
   return (
     <>
       <section className="ws">
         <div className="fh">
           <div>
             <span className="lbl">03 · Finished</span>
-            <h2>beach_sunset_24fps.mp4</h2>
-            <div className="fmeta">Saved to D:\Videos\Flowmotion</div>
+            <h2>{fileName ?? "Interpolation complete"}</h2>
+            {outputPath ? <div className="fmeta">Saved to {outputPath}</div> : null}
           </div>
         </div>
 
@@ -30,47 +54,58 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({ onNavigate }) => {
           <div className="rok">
             <b>Finished</b>
           </div>
-          <em>in 0:58 · 38 fps average</em>
+          {elapsedTime ? (
+            <em>
+              in {elapsedTime}
+              {averageSpeed != null ? ` · ${averageSpeed} fps average` : ""}
+            </em>
+          ) : null}
         </div>
 
         <div className="rcell">
           <span className="lbl">File</span>
-          <b className="rfn">beach_sunset_48fps.mp4</b>
+          <b className="rfn">{fileName ?? "—"}</b>
           <div className="rrow">
             <span>Size</span>
-            <b>38 MB</b>
+            <b>{fileSize ?? "—"}</b>
           </div>
           <div className="rrow">
             <span>Resolution</span>
-            <b>1920×1080</b>
+            <b>{resolution ?? "—"}</b>
           </div>
         </div>
 
         <div className="rcell">
           <span className="lbl">Frame rate</span>
           <div className="rfps">
-            <span>24</span>
+            <span>{sourceFps ?? "—"}</span>
             <i>→</i>
-            <span className="to">48</span>
+            <span className="to">{targetFps ?? "—"}</span>
             <small>fps</small>
           </div>
           <div className="rrow">
             <span>Frames</span>
-            <b>1,008 → 2,016</b>
+            <b>{totalFrames != null ? totalFrames.toLocaleString() : "—"}</b>
           </div>
         </div>
 
         <div className="rcell">
           <span className="lbl">Saved to</span>
-          <b className="rpath">D:\Videos\Flowmotion</b>
-          <div className="rrow">
-            <span>Model</span>
-            <b>Balanced</b>
-          </div>
+          <b className="rpath">{outputPath ?? "—"}</b>
+          {modelName ? (
+            <div className="rrow">
+              <span>Model</span>
+              <b>{modelName}</b>
+            </div>
+          ) : null}
         </div>
 
         <div className="rcell ract">
-          <button type="button" className="btn solid">
+          <button
+            type="button"
+            className="btn solid"
+            onClick={onShowInFolder}
+          >
             Show in folder
           </button>
           <button

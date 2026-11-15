@@ -8,8 +8,6 @@ export interface OnboardingScreenProps {
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   onNavigate,
 }) => {
-  const rulerTicks = Array.from({ length: 41 }, (_, i) => i % 2 !== 0);
-
   return (
     <div className="ws">
       <div className="stage" style={{ padding: 0, placeItems: "stretch", background: "var(--bg)" }}>
@@ -41,16 +39,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
               <div className="vz">
                 <div className="rl-head">
                   <span className="lbl">Timeline</span>
-                  <span className="fpsx">
-                    <b>24</b> fps
-                  </span>
                 </div>
                 <div className="ruler">
-                  {rulerTicks.map((isGenerated, i) => (
-                    <i
-                      key={i}
-                      className={isGenerated ? "g" : "o"}
-                    />
+                  {Array.from({ length: 41 }, (_, i) => (
+                    <i key={i} className={i % 2 !== 0 ? "g" : "o"} />
                   ))}
                   <div className="playhead" style={{ left: "30%", opacity: 1 }} />
                 </div>

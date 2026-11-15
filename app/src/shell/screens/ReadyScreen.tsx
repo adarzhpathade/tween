@@ -2,12 +2,20 @@ import React, { useState } from "react";
 import type { Screen } from "../types";
 
 export interface ReadyScreenProps {
+  fileName?: string;
+  fileMeta?: string;
   onNavigate?: (screen: Screen) => void;
+  onSelectVideo?: () => void;
 }
 
-export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
+export const ReadyScreen: React.FC<ReadyScreenProps> = ({
+  fileName,
+  fileMeta,
+  onNavigate,
+  onSelectVideo,
+}) => {
   const [view, setView] = useState<"orig" | "res">("res");
-  const [rate, setRate] = useState<number>(48);
+  const [multiplier, setMultiplier] = useState<string>("2×");
   const [model, setModel] = useState<string>("balanced");
   const [keepAudio, setKeepAudio] = useState<boolean>(true);
 
@@ -17,33 +25,47 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
         <div className="fh">
           <div>
             <span className="lbl">01 · Source</span>
-            <h2>beach_sunset_24fps.mp4</h2>
-            <div className="fmeta">
-              1920×1080 · 24 fps · 0:42 · H.264 · AAC · 1,008 frames
-            </div>
+            <h2>{fileName ?? "No video selected"}</h2>
+            {fileMeta ? <div className="fmeta">{fileMeta}</div> : null}
           </div>
         </div>
 
         <div className="stage">
-          <div className="canvas">
-            <div className="scene" />
-            <div className="vsw">
-              <button
-                type="button"
-                className={view === "orig" ? "on" : ""}
-                onClick={() => setView("orig")}
-              >
-                Original <small>24 fps</small>
-              </button>
-              <button
-                type="button"
-                className={view === "res" ? "on" : ""}
-                onClick={() => setView("res")}
-              >
-                Interpolated <small>{rate} fps</small>
-              </button>
+          {fileName ? (
+            <div className="canvas">
+              <div className="scene" />
+              <div className="vsw">
+                <button
+                  type="button"
+                  className={view === "orig" ? "on" : ""}
+                  onClick={() => setView("orig")}
+                >
+                  Original
+                </button>
+                <button
+                  type="button"
+                  className={view === "res" ? "on" : ""}
+                  onClick={() => setView("res")}
+                >
+                  Interpolated
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="dz sdz">
+              <div className="dzr">
+                <b className="dzt">Drop a video</b>
+                <span className="dzs">or browse your computer</span>
+                <button
+                  type="button"
+                  className="btn solid cta"
+                  onClick={onSelectVideo}
+                >
+                  Choose video <span>→</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="tr trim">
@@ -52,19 +74,19 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
               <span className="lbl">Trim</span>
               <span className="rd">
                 <span>In</span>
-                <b>00:00.0</b>
+                <b>—</b>
               </span>
               <span className="rd">
                 <span>Out</span>
-                <b>00:42.0</b>
+                <b>—</b>
               </span>
               <span className="rd len">
                 <span>Length</span>
-                <b>00:42.0</b>
+                <b>—</b>
               </span>
               <span className="rd">
                 <span>Frames</span>
-                <b>1,008</b>
+                <b>—</b>
               </span>
             </div>
             <div className="tbs">
@@ -75,11 +97,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
           </div>
 
           <div className="lane">
-            <div className="film">
-              {Array.from({ length: 48 }).map((_, i) => (
-                <i key={i} />
-              ))}
-            </div>
+            <div className="film" />
             <div className="sel" />
             <div className="hdl in" />
             <div className="hdl out" />
@@ -90,25 +108,24 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
       <aside className="frail">
         <span className="lbl">Frame rate</span>
         <div className="rv">
-          <div className="fr0">24 <i>→</i></div>
-          <div className="fr1">{rate}</div>
-          <small>fps</small>
+          <div className="fr0">Input <i>→</i></div>
+          <div className="fr1">{multiplier}</div>
+          <small>Target</small>
         </div>
 
         <div className="fseg v">
           {[
-            { f: 48, label: "2×", sub: "48 fps" },
-            { f: 72, label: "3×", sub: "72 fps" },
-            { f: 96, label: "4×", sub: "96 fps" },
-            { f: 60, label: "60", sub: "fps" },
-            { f: 120, label: "120", sub: "fps" },
-            { f: 90, label: "Custom", sub: "90 fps" },
-          ].map((item) => (
+            { label: "2×", sub: "Double" },
+            { label: "3×", sub: "Triple" },
+            { label: "4×", sub: "Quad" },
+            { label: "60", sub: "fps" },
+            { label: "120", sub: "fps" },
+          ].map((item, idx) => (
             <button
-              key={item.f}
+              key={idx}
               type="button"
-              className={rate === item.f ? "on" : ""}
-              onClick={() => setRate(item.f)}
+              className={multiplier === item.label ? "on" : ""}
+              onClick={() => setMultiplier(item.label)}
             >
               <b>{item.label}</b>
               <span>{item.sub}</span>
@@ -117,7 +134,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
         </div>
 
         <div className="gainv">
-          <b>+{rate - 24} frames<br />every second</b>
+          <b>Interpolation rate</b>
         </div>
       </aside>
 
@@ -144,7 +161,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
                   <b>Fast</b>
                   <small>Quicker, slightly softer motion</small>
                 </div>
-                <em>v4</em>
               </div>
               <div
                 className={`model ${model === "animation" ? "on" : ""}`}
@@ -154,7 +170,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
                   <b>Animation</b>
                   <small>Tuned for cartoons and anime</small>
                 </div>
-                <em>2× only</em>
               </div>
             </div>
           </div>
@@ -163,11 +178,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
             <div className="lbl">Output</div>
             <div className="row">
               <span>Encoder</span>
-              <b>H.264 · NVENC</b>
-            </div>
-            <div className="row">
-              <span>Quality</span>
-              <b>CQ 18</b>
+              <b>Auto</b>
             </div>
             <div className="row">
               <span>Keep audio</span>
@@ -177,25 +188,9 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
               />
             </div>
           </div>
-
-          <div className="grp">
-            <div className="lbl">Save to</div>
-            <div className="fold">
-              <div>
-                <b>Flowmotion</b>
-                <small>D:\Videos\Flowmotion</small>
-              </div>
-              <span>Choose</span>
-            </div>
-          </div>
         </div>
 
         <div className="ifoot">
-          <div className="est">
-            <span>~ <b>1m 50s</b></span>
-            <span><b>2,016</b> frames</span>
-            <span>~ <b>52</b> MB</span>
-          </div>
           <button
             type="button"
             className="go"

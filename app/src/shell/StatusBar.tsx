@@ -5,23 +5,26 @@ export interface StatusBarProps {
   screen: Screen;
   gpu?: string;
   engine?: string;
+  status?: string;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
   screen,
-  gpu = "RTX 4050 Laptop · Vulkan",
-  engine = "RIFE v4.6",
+  gpu,
+  engine,
+  status,
 }) => {
   if (screen === "onboarding") {
     return null;
   }
 
   const statusLabel =
-    screen === "processing"
-      ? "Interpolating…"
+    status ??
+    (screen === "processing"
+      ? "Processing"
       : screen === "done"
       ? "Finished"
-      : "Ready";
+      : "Ready");
 
   return (
     <footer className="sb" id="statusBar">
@@ -29,9 +32,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <i></i>
         {statusLabel}
       </span>
-      <span>{gpu}</span>
+      {gpu ? <span>{gpu}</span> : null}
       <span className="sp" />
-      <span>{engine}</span>
+      {engine ? <span>{engine}</span> : null}
     </footer>
   );
 };

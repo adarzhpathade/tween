@@ -9,7 +9,7 @@ export interface ScreenContextValue {
 
 export const SCREEN_TITLES: Record<Screen, string> = {
   onboarding: "Welcome",
-  ready: "beach_sunset_24fps.mp4",
+  ready: "Tween",
   processing: "Processing",
-  done: "beach_sunset_48fps.mp4",
+  done: "Finished",
 };
