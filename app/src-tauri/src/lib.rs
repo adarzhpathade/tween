@@ -23,6 +23,7 @@ pub fn run() {
             pipeline::extract_thumbnails,
             pipeline::pick_video_file,
             pipeline::pick_output_folder,
+            pipeline::clean::default_folders,
             pipeline::start_job,
             pipeline::cancel_job,
             pipeline::stats::sample_system_stats,

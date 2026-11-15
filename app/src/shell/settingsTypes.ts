@@ -1,7 +1,42 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+
 export interface StorageInfo {
   tempDir: string;
   freeBytes: number;
   inUseBytes: number;
+}
+
+export interface DefaultFolders {
+  output: string;
+  temp: string;
+}
+
+export function isMockDev(): boolean {
+  return Boolean(
+    import.meta.env.DEV &&
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("mock") === "1",
+  );
+}
+
+export async function fetchDefaultFolders(
+  customTemp?: string,
+): Promise<DefaultFolders | null> {
+  if (typeof window !== "undefined" && isTauri()) {
+    try {
+      return await invoke<DefaultFolders>("default_folders", { customTemp });
+    } catch (err) {
+      console.warn("default_folders error:", err);
+      return null;
+    }
+  }
+  if (isMockDev()) {
+    return {
+      output: "C:\\Users\\You\\Videos\\Tween",
+      temp: "C:\\Users\\You\\AppData\\Local\\Temp\\tween",
+    };
+  }
+  return null;
 }
 
 export interface SettingsDefaults {

@@ -8,6 +8,8 @@ import {
   formatBytes,
   loadSettingsDefaults,
   saveSettingsDefaults,
+  fetchDefaultFolders,
+  isMockDev,
 } from "./settingsTypes";
 
 export interface SettingsSheetProps {
@@ -192,6 +194,18 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
         .then((ver) => setAppVersion(ver))
         .catch(() => {});
     }
+    if (!defaults.outputFolder) {
+      fetchDefaultFolders().then((f) => {
+        if (!f?.output) return;
+        setDefaults((prev) => {
+          if (prev.outputFolder) return prev;
+          const updated = { ...prev, outputFolder: f.output };
+          saveSettingsDefaults(updated);
+          onDefaultsChanged?.(updated);
+          return updated;
+        });
+      });
+    }
   }, []);
 
   const refreshStorage = useCallback(() => {
@@ -199,10 +213,10 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
       invoke<StorageInfo>("storage_info")
         .then((info) => setStorageInfo(info))
         .catch((err) => console.warn("storage_info error:", err));
-    } else {
+    } else if (isMockDev()) {
       // Mock storage info for browser preview
       setStorageInfo({
-        tempDir: "D:\\Flowmotion\\scratch",
+        tempDir: "C:\\Users\\You\\AppData\\Local\\Temp\\tween",
         freeBytes: 214 * 1024 * 1024 * 1024,
         inUseBytes: 1.2 * 1024 * 1024 * 1024,
       });
@@ -539,11 +553,11 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
       } catch (err) {
         console.warn("pick_output_folder error:", err);
       }
-    } else {
+    } else if (isMockDev()) {
       // Mock toggle
       const mockList = [
-        "D:\\Videos\\Flowmotion",
-        "D:\\Video Creation\\Exports",
+        "C:\\Users\\You\\Videos\\Tween",
+        "C:\\Users\\You\\Videos\\Exports",
         "",
       ];
       const idx = mockList.indexOf(defaults.outputFolder);
@@ -606,7 +620,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
 
   const folderBasename = defaults.outputFolder
     ? defaults.outputFolder.split(/[\\/]/).filter(Boolean).pop() || "Folder"
-    : "Flowmotion";
+    : "—";
 
   const getRowState = (id: string) => {
     if (checkRows[id]?.state) return checkRows[id].state;
@@ -819,7 +833,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
                 <div>
                   <b>{folderBasename}</b>
                   <small>
-                    {defaults.outputFolder || "D:\\Videos\\Flowmotion"}
+                    {defaults.outputFolder || "—"}
                   </small>
                 </div>
                 <span>Choose</span>
@@ -850,7 +864,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({
             <div className="lbl">Storage</div>
             <div className="row">
               <span>Temp folder</span>
-              <b>{storageInfo?.tempDir || "D:\\Flowmotion\\scratch"}</b>
+              <b>{storageInfo?.tempDir || "—"}</b>
             </div>
             <div className="row">
               <span>Free space</span>

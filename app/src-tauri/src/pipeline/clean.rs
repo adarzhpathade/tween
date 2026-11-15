@@ -10,6 +10,34 @@ pub struct StorageInfo {
     pub in_use_bytes: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DefaultFolders {
+    pub output: String,
+    pub temp: String,
+}
+
+pub fn compute_default_output_folder() -> std::path::PathBuf {
+    let base = dirs::video_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Videos")))
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    base.join("Tween")
+}
+
+pub fn compute_default_folders(custom_temp: Option<String>) -> DefaultFolders {
+    let output = compute_default_output_folder().to_string_lossy().to_string();
+    let temp = custom_temp
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
+    DefaultFolders { output, temp }
+}
+
+#[tauri::command]
+pub fn default_folders(custom_temp: Option<String>) -> Result<DefaultFolders, String> {
+    Ok(compute_default_folders(custom_temp))
+}
+
 pub fn dir_size(path: &Path) -> u64 {
     let mut total = 0;
     if let Ok(entries) = std::fs::read_dir(path) {
@@ -139,5 +167,43 @@ mod tests {
         assert_eq!(calculate_tween_temp_size(&test_root), 0);
 
         let _ = std::fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn test_default_folders() {
+        let expected_base = dirs::video_dir()
+            .or_else(|| dirs::home_dir().map(|h| h.join("Videos")))
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let expected_output = expected_base.join("Tween");
+        let existed_before = expected_output.exists();
+
+        let folders = default_folders(None).expect("default_folders should succeed");
+        let out_path = std::path::Path::new(&folders.output);
+
+        // Path must end with "Tween"
+        assert!(
+            out_path.ends_with("Tween"),
+            "Default output folder must end with 'Tween', got: {}",
+            folders.output
+        );
+        assert!(!folders.temp.is_empty(), "Default temp folder must not be empty");
+
+        // Verify nothing was created on disk by default_folders
+        if !existed_before {
+            assert!(
+                !out_path.exists(),
+                "default_folders must not create output directory on disk: {}",
+                folders.output
+            );
+        }
+    }
+
+    #[test]
+    fn test_default_folders_with_custom_temp() {
+        let custom = "E:\\CustomTemp";
+        let folders = default_folders(Some(custom.to_string())).expect("default_folders should succeed");
+        assert_eq!(folders.temp, custom);
+        assert!(std::path::Path::new(&folders.output).ends_with("Tween"));
     }
 }
