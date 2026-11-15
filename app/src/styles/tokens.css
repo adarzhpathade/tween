@@ -36,9 +36,12 @@
   --dim: #5f5f5b;
 
   /* Accents */
-  --acc: #a9b79a;
+  --acc: #d9a55b;
+  --acc-rgb: 217, 165, 91;
+  --acc-ink: #111;
   --ok: #4ade80;
-  --warn: #c9907a;
+  --warn: #e0695a;
+  --warn-rgb: 224, 105, 90;
 
   /* Font families */
   --sans: "Geist", system-ui, -apple-system, sans-serif;
@@ -435,7 +438,7 @@ svg {
   top: .5px;
   width: 3px;
   height: 6px;
-  border: solid #111;
+  border: solid var(--acc-ink);
   border-width: 0 1.5px 1.5px 0;
   transform: rotate(40deg);
 }
@@ -493,7 +496,7 @@ svg {
 
 .router-switcher button.on {
   background: var(--acc);
-  color: #111;
+  color: var(--acc-ink);
 }
 
 /* Respect prefers-reduced-motion */
