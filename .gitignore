@@ -17,3 +17,7 @@ app/node_modules/
 app/dist/
 app/src-tauri/target/
 
+# Benchmark results
+bench-results/
+
+

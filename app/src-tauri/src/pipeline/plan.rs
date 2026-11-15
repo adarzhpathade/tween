@@ -180,9 +180,78 @@ pub fn cut_fixes(chunk: &Chunk, cuts: &HashSet<usize>) -> Vec<CutFix> {
     fixes
 }
 
-pub fn chunk_size(width: u32, height: u32, p: u64, q: u64) -> usize {
-    let per_frame = (width as f64) * (height as f64) * 1.6;
+pub fn rife_threads(cpu_threads: usize, is_gpu: bool, is_integrated: bool) -> String {
+    if !is_gpu || is_integrated {
+        return "1:1:1".to_string();
+    }
+    if cpu_threads >= 8 {
+        "4:2:4".to_string()
+    } else if cpu_threads >= 4 {
+        "2:2:2".to_string()
+    } else {
+        "1:1:1".to_string()
+    }
+}
+
+pub fn chunk_size_with_disk(width: u32, height: u32, p: u64, q: u64, free_disk: Option<u64>) -> usize {
+    let in_per_frame = (width as f64) * (height as f64) * 3.1;
+    let out_per_frame = (width as f64) * (height as f64) * 1.6;
     let ratio = (p as f64) / (q as f64);
-    let raw = (1.2e9 / (per_frame * (1.0 + ratio))).round() as i64;
-    raw.clamp(24, 600) as usize
+    let bytes_per_input_frame = in_per_frame + (out_per_frame * ratio);
+
+    let max_target_bytes: f64 = 4.0e9; // 4 GB cap
+    let target_bytes = if let Some(free) = free_disk {
+        let available = free.saturating_sub(1_000_000_000) as f64;
+        let per_chunk = (available / 2.0).max(1.0e8);
+        per_chunk.min(max_target_bytes)
+    } else {
+        max_target_bytes
+    };
+
+    let raw = (target_bytes / bytes_per_input_frame).round() as i64;
+    raw.clamp(24, 1500) as usize
+}
+
+pub fn chunk_size(width: u32, height: u32, p: u64, q: u64) -> usize {
+    chunk_size_with_disk(width, height, p, q, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rife_threads_tuning() {
+        assert_eq!(rife_threads(16, true, false), "4:2:4");
+        assert_eq!(rife_threads(8, true, false), "4:2:4");
+        assert_eq!(rife_threads(6, true, false), "2:2:2");
+        assert_eq!(rife_threads(4, true, false), "2:2:2");
+        assert_eq!(rife_threads(2, true, false), "1:1:1");
+        assert_eq!(rife_threads(16, true, true), "1:1:1"); // integrated GPU
+        assert_eq!(rife_threads(16, false, false), "1:1:1"); // CPU mode
+    }
+
+    #[test]
+    fn test_chunk_size_uncompressed_and_caps() {
+        // 1080p at 2x with no disk limit reaches 4 GB cap (~300 frames instead of old ~93)
+        let cs_1080p_2x = chunk_size(1920, 1080, 2, 1);
+        assert!((280..=350).contains(&cs_1080p_2x), "Expected ~306 frames for 1080p 2x, got {}", cs_1080p_2x);
+
+        // Low resolution capped at 1500 frames
+        let cs_low_res = chunk_size(320, 240, 2, 1);
+        assert_eq!(cs_low_res, 1500);
+
+        // High resolution still at least 24 frames
+        let cs_4k_4x = chunk_size(3840, 2160, 4, 1);
+        assert!(cs_4k_4x >= 24);
+
+        // With tight free disk space (e.g. 2 GB free -> 500 MB per chunk)
+        let cs_tight = chunk_size_with_disk(1920, 1080, 2, 1, Some(2_000_000_000));
+        assert!(cs_tight < cs_1080p_2x, "Tight disk chunk size {} should be smaller than uncapped {}", cs_tight, cs_1080p_2x);
+        assert!(cs_tight >= 24);
+
+        // With ample free disk space (e.g. 100 GB free -> 4 GB cap)
+        let cs_ample = chunk_size_with_disk(1920, 1080, 2, 1, Some(100_000_000_000));
+        assert_eq!(cs_ample, cs_1080p_2x);
+    }
 }
