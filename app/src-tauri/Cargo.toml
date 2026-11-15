@@ -18,7 +18,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 flate2 = "1.0"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time", "process", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time", "process", "net", "sync"] }
 futures-util = "0.3"
 regex = "1.10"
 
