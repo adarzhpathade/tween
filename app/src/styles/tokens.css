@@ -103,6 +103,8 @@ svg {
 .win {
   width: 100vw;
   height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
   background: var(--bg);
   overflow: hidden;
   display: grid;
@@ -159,6 +161,10 @@ svg {
   font-size: 11px;
   color: var(--mut);
   text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 10px;
 }
 
 .wc {
@@ -202,16 +208,22 @@ svg {
 }
 
 .body[data-state="ready"] {
-  grid-template-columns: 1fr 116px 320px;
+  grid-template-columns: minmax(0, 1fr) 116px minmax(260px, 320px);
+}
+
+@media (max-width: 1120px) {
+  .body[data-state="ready"] {
+    grid-template-columns: minmax(0, 1fr) 116px minmax(260px, 280px);
+  }
 }
 
 .body[data-state="processing"],
 .body[data-state="proc"] {
-  grid-template-columns: 1fr 300px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
 }
 
 .body[data-state="done"] {
-  grid-template-columns: 1fr 300px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
 }
 
 /* ---------- Status Bar ---------- */
