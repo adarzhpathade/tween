@@ -109,7 +109,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   // The app starts strictly in the empty state (probeInfo = null).
   // Mock data is only allowed in DEV with explicit ?mock=1 query parameter.
   const [probeInfo, setProbeInfo] = useState<ProbeInfo | null>(() => {
-    if (initialProbe !== undefined) return initialProbe;
+    if (initialProbe) return initialProbe;
     if (import.meta.env.DEV && typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (params.get("mock") === "1") {
@@ -151,7 +151,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const [setupConfig, setSetupConfig] = useState<SetupConfig | null>(null);
 
   useEffect(() => {
-    if (initialProbe !== undefined) {
+    if (initialProbe) {
       setProbeInfo(initialProbe);
     }
   }, [initialProbe]);

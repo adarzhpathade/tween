@@ -67,7 +67,7 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
   const [screen, setScreen] = useState<Screen>(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const stateParam = params.get("state");
+      const stateParam = params.get("screen") || params.get("state");
       if (
         stateParam === "onboarding" ||
         stateParam === "ready" ||
@@ -91,7 +91,7 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    const hasExplicit = params.has("state") || params.has("step");
+    const hasExplicit = params.has("screen") || params.has("state") || params.has("step");
     if (hasExplicit) return;
 
     if (isTauri()) {
@@ -116,28 +116,6 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
 
   useEffect(() => {
     setTitle(SCREEN_TITLES[screen]);
-  }, [screen]);
-
-  // Keyboard navigation shortcuts: 1-4 matching the mock
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA")
-      ) {
-        return;
-      }
-
-      if (e.key === "1") setScreen("onboarding");
-      else if (e.key === "2") setScreen("ready");
-      else if (e.key === "3") setScreen("processing");
-      else if (e.key === "4") setScreen("done");
-      else if (e.key === "Escape" && screen === "processing") setScreen("ready");
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [screen]);
 
   return (
@@ -166,8 +144,20 @@ export const ScreenRouter: React.FC = () => {
     onboardingStep,
     allowGranted,
   } = useScreen();
+  const isMockDev = Boolean(
+    import.meta.env.DEV &&
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("mock") === "1",
+  );
+
   const [setupCfg, setSetupCfg] = useState<any>(null);
-  const [videoLoaded, setVideoLoaded] = useState<boolean>(false);
+  const [videoLoaded, setVideoLoaded] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("mock") === "1") return true;
+    }
+    return false;
+  });
 
   // Pipeline job state
   const [activeProbe, setActiveProbe] = useState<ProbeInfo | null>(null);
@@ -295,7 +285,7 @@ export const ScreenRouter: React.FC = () => {
 
   const statusLabel =
     screen === "ready"
-      ? videoLoaded
+      ? videoLoaded || isMockDev
         ? "Ready"
         : "Idle"
       : screen === "processing"
@@ -310,11 +300,13 @@ export const ScreenRouter: React.FC = () => {
       : screen === "ready"
       ? videoLoaded && activeProbe
         ? activeProbe.name
+        : isMockDev
+        ? "beach_sunset_24fps.mp4"
         : "Tween"
       : screen === "processing"
-      ? activeProbe?.name || "Processing"
+      ? activeProbe?.name || (isMockDev ? "beach_sunset_24fps.mp4" : "Processing")
       : screen === "done"
-      ? activeProbe?.name || "Finished"
+      ? activeProbe?.name || (isMockDev ? "beach_sunset_24fps.mp4" : "Finished")
       : title;
 
   const renderScreen = () => {
@@ -367,7 +359,7 @@ export const ScreenRouter: React.FC = () => {
     <div
       className="win"
       data-state={screen}
-      data-file={screen === "ready" ? (videoLoaded ? "loaded" : "none") : undefined}
+      data-file={screen === "ready" ? (videoLoaded || isMockDev ? "loaded" : "none") : undefined}
     >
       <TitleBar title={displayTitle} brand="Tween" />
       <AnimatePresence mode="wait">
@@ -382,38 +374,40 @@ export const ScreenRouter: React.FC = () => {
         status={statusLabel}
       />
 
-      {/* Review switcher control matching mock */}
-      <div className="router-switcher" role="navigation" aria-label="Screen switcher">
-        <span>Screen</span>
-        <button
-          type="button"
-          className={screen === "onboarding" ? "on" : ""}
-          onClick={() => setScreen("onboarding")}
-        >
-          Onboarding
-        </button>
-        <button
-          type="button"
-          className={screen === "ready" ? "on" : ""}
-          onClick={() => setScreen("ready")}
-        >
-          Ready
-        </button>
-        <button
-          type="button"
-          className={screen === "processing" ? "on" : ""}
-          onClick={() => setScreen("processing")}
-        >
-          Processing
-        </button>
-        <button
-          type="button"
-          className={screen === "done" ? "on" : ""}
-          onClick={() => setScreen("done")}
-        >
-          Done
-        </button>
-      </div>
+      {/* Developer-only switcher behind import.meta.env.DEV && ?mock=1 */}
+      {isMockDev ? (
+        <div className="router-switcher" role="navigation" aria-label="Screen switcher">
+          <span>Screen</span>
+          <button
+            type="button"
+            className={screen === "onboarding" ? "on" : ""}
+            onClick={() => setScreen("onboarding")}
+          >
+            Onboarding
+          </button>
+          <button
+            type="button"
+            className={screen === "ready" ? "on" : ""}
+            onClick={() => setScreen("ready")}
+          >
+            Ready
+          </button>
+          <button
+            type="button"
+            className={screen === "processing" ? "on" : ""}
+            onClick={() => setScreen("processing")}
+          >
+            Processing
+          </button>
+          <button
+            type="button"
+            className={screen === "done" ? "on" : ""}
+            onClick={() => setScreen("done")}
+          >
+            Done
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 };
