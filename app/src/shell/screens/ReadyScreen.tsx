@@ -372,7 +372,21 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     }
     return "";
   });
-  const [inputErr, setInputErr] = useState<string | null>(null);
+  const [inputErr, setInputErr] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get("custom") === "edit") {
+        const cv = p.get("customval");
+        if (cv) {
+          const srcParam = parseFloat(p.get("src") || "24");
+          const sFps = isNaN(srcParam) || srcParam <= 0 ? 24 : srcParam;
+          const res = checkCustomVal(cv, sFps);
+          return res.err || null;
+        }
+      }
+    }
+    return null;
+  });
 
   const frailRef = useRef<HTMLElement | null>(null);
   const fsegRef = useRef<HTMLDivElement | null>(null);
@@ -470,7 +484,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   // Custom edit actions
   const enterEdit = useCallback(
     (initVal?: number, instant?: boolean) => {
-      if (isEditingCustom) return;
+      if (isEditingCustom && initVal === undefined) return;
       setPrevChoice(selectedChoice);
       setSelectedChoice("Custom");
       setIsEditingCustom(true);

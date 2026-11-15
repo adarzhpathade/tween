@@ -107,8 +107,8 @@
 }
 
 .scene.mock {
-  background: radial-gradient(circle at 68% 58%, #a9b79a44 0 7%, transparent 22%),
-              radial-gradient(circle at 68% 58%, #a9b79acc 0 1.6%, transparent 1.8%),
+  background: radial-gradient(circle at 68% 58%, rgba(var(--acc-rgb), .267) 0 7%, transparent 22%),
+              radial-gradient(circle at 68% 58%, rgba(var(--acc-rgb), .8) 0 1.6%, transparent 1.8%),
               linear-gradient(135deg, #262626, #0e0e0e);
 }
 
@@ -332,9 +332,8 @@
   bottom: -2px;
   border-top: 2px solid var(--acc);
   border-bottom: 2px solid var(--acc);
-  background: #a9b79a14;
+  background: rgba(var(--acc-rgb), .078);
   pointer-events: none;
-  box-shadow: 0 0 24px -6px var(--acc);
 }
 
 .shade {
@@ -578,8 +577,9 @@
 }
 
 .rv.bad .fin {
-  color: #c9907a;
-  border-bottom-color: #c9907a;
+  color: var(--warn);
+  border-bottom-color: var(--warn);
+  caret-color: var(--warn);
 }
 
 .stp {
@@ -614,7 +614,7 @@
 }
 
 .stp button:active {
-  background: #a9b79a22;
+  background: rgba(var(--acc-rgb), .133);
 }
 
 .stp button::before {
@@ -675,8 +675,12 @@
   margin-top: 2px;
 }
 
+.fhint.bad {
+  color: var(--warn);
+}
+
 .fhint.bad .fhint-l2 {
-  color: #c9907a;
+  color: var(--warn);
 }
 
 .fseg.v {
@@ -847,7 +851,7 @@
 
 .model.on {
   border-color: var(--acc);
-  background: #a9b79a12;
+  background: rgba(var(--acc-rgb), .071);
   color: var(--text);
 }
 
@@ -1279,7 +1283,7 @@
   height: 85%;
   z-index: -1;
   pointer-events: none;
-  background: radial-gradient(ellipse at 50% 100%, rgba(169, 183, 154, .2), transparent 65%);
+  background: radial-gradient(ellipse at 50% 100%, rgba(var(--acc-rgb), .2), transparent 65%);
   animation: drift 9s ease-in-out infinite alternate;
 }
 
@@ -1561,7 +1565,7 @@
   top: .5px;
   width: 3px;
   height: 6px;
-  border: solid #111;
+  border: solid var(--acc-ink);
   border-width: 0 1.5px 1.5px 0;
   transform: rotate(40deg);
 }
@@ -1860,7 +1864,7 @@
 .dz:hover,
 .dz.over {
   border-color: var(--acc);
-  background: radial-gradient(circle, #a9b79a30 1px, transparent 1.2px) 0 0/22px 22px, var(--bg2);
+  background: radial-gradient(circle, rgba(var(--acc-rgb), .188) 1px, transparent 1.2px) 0 0/22px 22px, var(--bg2);
 }
 
 .dz .cm {
@@ -2187,7 +2191,7 @@
 
 .sheet .model.on {
   border-color: var(--acc);
-  background: #a9b79a12;
+  background: rgba(var(--acc-rgb), .071);
 }
 
 .sheet .model .mtx {
