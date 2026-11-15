@@ -708,10 +708,12 @@
           "warnings"
         ],
         [
-          "npx",
+          "npm",
           "--prefix",
           "app",
+          "run",
           "tauri",
+          "--",
           "build",
           "--no-bundle"
         ]
@@ -812,10 +814,12 @@
           "warnings"
         ],
         [
-          "npx",
+          "npm",
           "--prefix",
           "app",
+          "run",
           "tauri",
+          "--",
           "build",
           "--no-bundle"
         ]
