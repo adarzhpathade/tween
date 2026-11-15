@@ -46,6 +46,16 @@ fn fake_rife_path() -> Option<PathBuf> {
     }
 }
 
+fn fake_rife_stream_path() -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let p = manifest_dir.join("../../test/fake-rife-stream.js");
+    if p.exists() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
 fn make_test_cfg(work: &Path, fake_rife: &Path) -> PipelineConfig {
     PipelineConfig {
         ffmpeg: "ffmpeg".into(),
@@ -60,6 +70,8 @@ fn make_test_cfg(work: &Path, fake_rife: &Path) -> PipelineConfig {
         encoders: vec!["libx264".into()],
         models: vec!["rife-v4.26".into()],
         rife_cmd: Some(vec!["node".into(), fake_rife.to_string_lossy().to_string()]),
+        engine_mode: None,
+        rife_stream_cmd: None,
     }
 }
 
@@ -279,6 +291,7 @@ async fn test_e2e_long_many_chunks() {
             scene_threshold: None,
             tta: Some(false),
             chunk_frames: Some(chunk_size_override),
+            engine_mode: None,
             cfg: Some(cfg.clone()),
         };
 
@@ -434,6 +447,7 @@ async fn test_e2e_non_integer_rates() {
                 scene_threshold: None,
                 tta: Some(false),
                 chunk_frames: Some(40),
+                engine_mode: None,
                 cfg: Some(cfg.clone()),
             };
 
@@ -517,6 +531,7 @@ async fn test_e2e_non_integer_rates() {
                 scene_threshold: None,
                 tta: Some(false),
                 chunk_frames: Some(45),
+                engine_mode: None,
                 cfg: Some(cfg.clone()),
             };
 
@@ -635,6 +650,7 @@ async fn test_e2e_trim() {
             scene_threshold: None,
             tta: Some(false),
             chunk_frames: Some(50),
+            engine_mode: None,
             cfg: Some(cfg.clone()),
         };
 
@@ -763,6 +779,7 @@ async fn test_e2e_scene_cuts() {
             scene_threshold: Some(10.0),
             tta: Some(false),
             chunk_frames: Some(40),
+            engine_mode: None,
             cfg: Some(cfg.clone()),
         };
 
@@ -938,6 +955,7 @@ async fn test_e2e_variable_frame_rate() {
             scene_threshold: None,
             tta: Some(false),
             chunk_frames: Some(40),
+            engine_mode: None,
             cfg: Some(cfg.clone()),
         };
 
@@ -1068,6 +1086,7 @@ async fn test_e2e_disk_space_guard_and_cancel() {
             scene_threshold: None,
             tta: Some(false),
             chunk_frames: Some(30),
+            engine_mode: None,
             cfg: Some(cfg.clone()),
         };
 
@@ -1272,5 +1291,236 @@ async fn test_bench_pipeline() {
         clip.to_str().unwrap(),
     ]);
     let _ = run_cmd_timeout(gen_cmd, Duration::from_secs(15)).await;
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+#[tokio::test]
+async fn test_e2e_stream_engine_matches_file_mode() {
+    if !has_ffmpeg_and_node() {
+        eprintln!("Skipping stream test: ffmpeg or node not in PATH");
+        return;
+    }
+    let fake_rife = match fake_rife_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("Skipping: test/fake-rife.js not found");
+            return;
+        }
+    };
+    let fake_stream = match fake_rife_stream_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("Skipping: test/fake-rife-stream.js not found");
+            return;
+        }
+    };
+
+    let work = unique_temp_dir("stream-vs-file");
+    let clip = work.join("input-10s-cut.mp4");
+
+    // Generate 10 s clip with hard cut at 5 s and 440 Hz audio
+    let mut gen_cmd = tokio::process::Command::new("ffmpeg");
+    gen_cmd.args([
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=320x240:rate=24:duration=5",
+        "-f",
+        "lavfi",
+        "-i",
+        "smptebars=size=320x240:rate=24:duration=5",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:duration=10",
+        "-filter_complex",
+        "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+        "-map",
+        "[v]",
+        "-map",
+        "2:a",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        clip.to_str().unwrap(),
+    ]);
+    let out = run_cmd_timeout(gen_cmd, Duration::from_secs(30)).await;
+    assert!(out.status.success(), "Failed to generate 10s test clip");
+
+    let cfg_probe = make_test_cfg(&work, &fake_rife);
+    let info = probe(&cfg_probe, clip.to_str().unwrap())
+        .await
+        .expect("probe failed");
+
+    // 1. Run file mode
+    let mut cfg_file = cfg_probe.clone();
+    cfg_file.engine_mode = Some("file".into());
+    let out_file = work.join("out_file.mp4");
+    let req_file = JobRequest {
+        info: info.clone(),
+        target: Target {
+            mode: "multiplier".into(),
+            value: TargetValue::Number(2.0),
+        },
+        model: "rife-v4.26".into(),
+        encoder: "libx264".into(),
+        quality: Some(18),
+        keep_audio: Some(true),
+        output: out_file.to_string_lossy().to_string(),
+        temp_root: Some(work.to_string_lossy().to_string()),
+        trim: None,
+        scene_detect: Some(true),
+        scene_threshold: Some(10.0),
+        tta: Some(false),
+        chunk_frames: Some(40),
+        engine_mode: Some("file".into()),
+        cfg: Some(cfg_file.clone()),
+    };
+    let res_file = run_pipeline(cfg_file, req_file, |_| {}, Arc::new(AtomicBool::new(false))).await;
+    assert!(res_file.ok, "File mode pipeline failed: {:?}", res_file.error);
+
+    // 2. Run stream mode
+    let mut cfg_stream = make_test_cfg(&work, &fake_rife);
+    cfg_stream.engine_mode = Some("stream".into());
+    cfg_stream.rife_stream_cmd = Some(vec!["node".into(), fake_stream.to_string_lossy().to_string()]);
+    let out_stream = work.join("out_stream.mp4");
+    let req_stream = JobRequest {
+        info: info.clone(),
+        target: Target {
+            mode: "multiplier".into(),
+            value: TargetValue::Number(2.0),
+        },
+        model: "rife-v4.26".into(),
+        encoder: "libx264".into(),
+        quality: Some(18),
+        keep_audio: Some(true),
+        output: out_stream.to_string_lossy().to_string(),
+        temp_root: Some(work.to_string_lossy().to_string()),
+        trim: None,
+        scene_detect: Some(true),
+        scene_threshold: Some(10.0),
+        tta: Some(false),
+        chunk_frames: None,
+        engine_mode: Some("stream".into()),
+        cfg: Some(cfg_stream.clone()),
+    };
+    let res_stream = run_pipeline(cfg_stream, req_stream, |_| {}, Arc::new(AtomicBool::new(false))).await;
+    assert!(res_stream.ok, "Stream mode pipeline failed: {:?}", res_stream.error);
+    assert_eq!(res_stream.engine_mode.as_deref(), Some("stream"));
+
+    // 3. Verify parity
+    assert_eq!(
+        res_stream.frames, res_file.frames,
+        "Stream frames ({:?}) must match file frames ({:?})",
+        res_stream.frames, res_file.frames
+    );
+
+    let packets_file = count_packets("ffprobe", out_file.to_str().unwrap()).await;
+    let packets_stream = count_packets("ffprobe", out_stream.to_str().unwrap()).await;
+    assert_eq!(
+        packets_stream, packets_file,
+        "Packet count must match between stream and file"
+    );
+
+    let rate_file = stream_rate("ffprobe", out_file.to_str().unwrap()).await;
+    let rate_stream = stream_rate("ffprobe", out_stream.to_str().unwrap()).await;
+    assert_eq!(rate_stream, rate_file, "Frame rate must match");
+
+    let ssim = ssim_between("ffmpeg", out_file.to_str().unwrap(), out_stream.to_str().unwrap()).await;
+    println!("SSIM between file mode and stream mode: {:.6}", ssim);
+    assert!(
+        ssim > 0.999,
+        "Stream mode output must match file mode output (ssim={})",
+        ssim
+    );
+
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+#[tokio::test]
+async fn test_e2e_stream_fallback_on_failure() {
+    if !has_ffmpeg_and_node() {
+        eprintln!("Skipping fallback test: ffmpeg or node not in PATH");
+        return;
+    }
+    let fake_rife = match fake_rife_path() {
+        Some(p) => p,
+        None => return,
+    };
+    let fake_stream = match fake_rife_stream_path() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let work = unique_temp_dir("stream-fallback");
+    let clip = work.join("input-2s.mp4");
+
+    let mut gen_cmd = tokio::process::Command::new("ffmpeg");
+    gen_cmd.args([
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=320x240:rate=24:duration=2",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        clip.to_str().unwrap(),
+    ]);
+    let out = run_cmd_timeout(gen_cmd, Duration::from_secs(15)).await;
+    assert!(out.status.success(), "Failed to generate 2s test clip");
+
+    let cfg_probe = make_test_cfg(&work, &fake_rife);
+    let info = probe(&cfg_probe, clip.to_str().unwrap())
+        .await
+        .expect("probe failed");
+
+    // Enable FAKE_RIFE_FAIL
+    std::env::set_var("FAKE_RIFE_FAIL", "1");
+
+    let mut cfg_stream = make_test_cfg(&work, &fake_rife);
+    cfg_stream.engine_mode = Some("stream".into());
+    cfg_stream.rife_stream_cmd = Some(vec!["node".into(), fake_stream.to_string_lossy().to_string()]);
+    let out_stream = work.join("out_fallback.mp4");
+
+    let req_stream = JobRequest {
+        info,
+        target: Target {
+            mode: "multiplier".into(),
+            value: TargetValue::Number(2.0),
+        },
+        model: "rife-v4.26".into(),
+        encoder: "libx264".into(),
+        quality: Some(18),
+        keep_audio: Some(false),
+        output: out_stream.to_string_lossy().to_string(),
+        temp_root: Some(work.to_string_lossy().to_string()),
+        trim: None,
+        scene_detect: Some(false),
+        scene_threshold: None,
+        tta: Some(false),
+        chunk_frames: None,
+        engine_mode: Some("stream".into()),
+        cfg: Some(cfg_stream.clone()),
+    };
+
+    let res = run_pipeline(cfg_stream, req_stream, |_| {}, Arc::new(AtomicBool::new(false))).await;
+    std::env::remove_var("FAKE_RIFE_FAIL");
+
+    assert!(res.ok, "Pipeline should succeed via fallback: {:?}", res.error);
+    assert!(out_stream.exists(), "Output file must exist after fallback");
+    assert_eq!(res.frames, Some(96));
+
     let _ = std::fs::remove_dir_all(&work);
 }

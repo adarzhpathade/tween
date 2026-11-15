@@ -173,6 +173,8 @@ pub struct SetupConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoders: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub paths_exist: Option<bool>,
 }
 
@@ -1920,6 +1922,7 @@ mod tests {
             }),
             devices: Some(vec![]),
             encoders: Some(vec!["hevc_nvenc".to_string()]),
+            engine_mode: None,
             paths_exist: None,
         };
 

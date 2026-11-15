@@ -137,6 +137,10 @@ pub struct PipelineConfig {
     #[serde(default)]
     pub models: Vec<String>,
     pub rife_cmd: Option<Vec<String>>,
+    #[serde(default)]
+    pub engine_mode: Option<String>,
+    #[serde(default)]
+    pub rife_stream_cmd: Option<Vec<String>>,
 }
 
 fn default_ffmpeg() -> String {
@@ -162,6 +166,8 @@ impl Default for PipelineConfig {
             encoders: vec!["libx264".to_string()],
             models: vec!["rife-v4.26".to_string()],
             rife_cmd: None,
+            engine_mode: None,
+            rife_stream_cmd: None,
         }
     }
 }
@@ -182,6 +188,8 @@ pub struct JobRequest {
     pub scene_threshold: Option<f64>,
     pub tta: Option<bool>,
     pub chunk_frames: Option<usize>,
+    #[serde(default)]
+    pub engine_mode: Option<String>,
     pub cfg: Option<PipelineConfig>,
 }
 
@@ -224,6 +232,8 @@ pub struct JobFinished {
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seconds: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]

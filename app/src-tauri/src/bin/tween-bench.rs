@@ -197,6 +197,8 @@ fn locate_setup_config() -> Option<(PipelineConfig, String, String)> {
             encoders,
             models,
             rife_cmd: None,
+            engine_mode: Some(engine_mode.to_lowercase()),
+            rife_stream_cmd: None,
         };
 
         return Some((cfg, gpu_name, engine_mode));
@@ -225,13 +227,41 @@ fn pick_encoder(cfg: &PipelineConfig) -> String {
 
 #[tokio::main]
 async fn main() {
-    let (cfg, gpu_name, engine_mode) = match locate_setup_config() {
+    let (mut cfg, gpu_name, mut engine_mode) = match locate_setup_config() {
         Some(c) => c,
         None => {
             eprintln!("no GPU engine installed");
             std::process::exit(1);
         }
     };
+
+    let args: Vec<String> = std::env::args().collect();
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--engine-mode" && i + 1 < args.len() {
+            let m = args[i + 1].to_lowercase();
+            cfg.engine_mode = Some(m.clone());
+            engine_mode = match m.as_str() {
+                "stream" => "Stream".to_string(),
+                "file" => "File".to_string(),
+                "auto" => "Auto".to_string(),
+                _ => m,
+            };
+            i += 2;
+        } else if let Some(stripped) = args[i].strip_prefix("--engine-mode=") {
+            let m = stripped.to_lowercase();
+            cfg.engine_mode = Some(m.clone());
+            engine_mode = match m.as_str() {
+                "stream" => "Stream".to_string(),
+                "file" => "File".to_string(),
+                "auto" => "Auto".to_string(),
+                _ => m,
+            };
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
 
     let encoder = pick_encoder(&cfg);
 
@@ -325,6 +355,7 @@ async fn main() {
         scene_threshold: None,
         tta: Some(false),
         chunk_frames: None,
+        engine_mode: cfg.engine_mode.clone(),
         cfg: Some(cfg.clone()),
     };
 

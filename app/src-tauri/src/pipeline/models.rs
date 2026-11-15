@@ -44,3 +44,14 @@ pub fn rife_exe(dir: &Path) -> PathBuf {
         dir.join("rife-ncnn-vulkan")
     }
 }
+
+pub fn rife_stream_exe(dir: &Path) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        dir.join("rife-ncnn-vulkan-stream.exe")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        dir.join("rife-ncnn-vulkan-stream")
+    }
+}
