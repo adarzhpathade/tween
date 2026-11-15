@@ -113,11 +113,6 @@ jobs:
             arch: arm64
             ncnn_url: https://github.com/Tencent/ncnn/releases/download/20240410/ncnn-20240410-macos-vulkan.zip
             binary: build/rife-ncnn-vulkan-stream
-          - os_name: macos-x64
-            runner_os: macos-latest
-            arch: x86_64
-            ncnn_url: https://github.com/Tencent/ncnn/releases/download/20240410/ncnn-20240410-macos-vulkan.zip
-            binary: build/rife-ncnn-vulkan-stream
 
     steps:
       - name: Checkout repository
