@@ -1,5 +1,6 @@
 import React from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import tweenMark from "../assets/tween-mark.png";
 
 export interface TitleBarProps {
   title?: string;
@@ -44,7 +45,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   return (
     <header className="tb" data-tauri-drag-region>
       <div className="brand" data-tauri-drag-region>
-        <i></i>{brand}
+        <img className="brand-mark" src={tweenMark} alt="" draggable={false} data-tauri-drag-region />
+        {brand}
       </div>
       <div className="title" id="title" data-tauri-drag-region>
         {title}
