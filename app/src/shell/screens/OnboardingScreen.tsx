@@ -22,12 +22,12 @@ interface SetupItemCard {
 }
 
 const DEFAULT_ITEMS: SetupItemCard[] = [
-  { id: "system", label: "Scratch disk", state: "idle", detail: "214 GB free" },
-  { id: "gpu", label: "Graphics card", state: "idle", detail: "RTX 4050 Laptop · 6 GB" },
-  { id: "ffmpeg", label: "FFmpeg", state: "idle", detail: "9.0.2 · bundled" },
-  { id: "engine", label: "Interpolation engine", state: "idle", detail: "RIFE v4.6 · 448 MB" },
-  { id: "accel", label: "GPU acceleration", state: "idle", detail: "1.3 · compute ready" },
-  { id: "encoder", label: "Video encoder", state: "idle", detail: "NVENC H.264 / H.265" },
+  { id: "system", label: "System", state: "idle", detail: "—" },
+  { id: "gpu", label: "Graphics", state: "idle", detail: "—" },
+  { id: "ffmpeg", label: "FFmpeg", state: "idle", detail: "—" },
+  { id: "engine", label: "Interpolation engine", state: "idle", detail: "—" },
+  { id: "accel", label: "GPU acceleration", state: "idle", detail: "—" },
+  { id: "encoder", label: "Video encoder", state: "idle", detail: "—" },
 ];
 
 const META = ["Welcome", "System check", "Access"] as const;
@@ -56,20 +56,9 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   });
 
   const [cards, setCards] = useState<SetupItemCard[]>(() => DEFAULT_ITEMS);
-  const [, setSetupRunning] = useState<boolean>(false);
   const [setupOk, setSetupOk] = useState<boolean>(false);
   const [setupConfig, setSetupConfig] = useState<SetupConfig | null>(null);
   const [computeDevice, setComputeDevice] = useState<"gpu" | "cpu">("gpu");
-  const [simMissing, setSimMissing] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      return /missing=1/.test(window.location.search) || simulateMissing;
-    }
-    return simulateMissing;
-  });
-
-  useEffect(() => {
-    setSimMissing(simulateMissing);
-  }, [simulateMissing]);
 
   // Page 3 permissions state
   const [readAllowed, setReadAllowed] = useState<boolean>(() => {
@@ -384,15 +373,14 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
 
   // Page 2: Run setup checks
   const runSetupChecks = async () => {
-    setSetupRunning(true);
     setSetupOk(false);
 
-    // Initialise cards in checking state
+    // Initialise cards in checking state with neutral placeholder
     setCards((prev) =>
       prev.map((c) => ({
         ...c,
         state: "checking",
-        detail: c.id === "accel" ? "Running a test frame" : "",
+        detail: c.id === "accel" ? "Running a test frame" : "Waiting",
         progress: null,
       })),
     );
@@ -405,12 +393,17 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
       } catch (err) {
         console.error("setup_run failed:", err);
         setSetupOk(false);
-      } finally {
-        setSetupRunning(false);
       }
-    } else {
-      // Browser simulated checks
-      simulateBrowserChecks();
+      return;
+    }
+
+    // Only in development when explicitly requested via ?mock=1 in URL
+    if (
+      import.meta.env.DEV &&
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("mock") === "1"
+    ) {
+      simulateDevMockChecks();
     }
   };
 
@@ -458,30 +451,34 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
     };
   }, [step]);
 
-  // Simulated browser checks for dev / mock testing
-  const simulateBrowserChecks = () => {
+  // Dev mock simulation for browser testing (?mock=1)
+  const simulateDevMockChecks = () => {
     const isRM = prefersReducedMotion();
-    const missingIds = simMissing ? ["ffmpeg", "engine"] : [];
+    const isMissing =
+      simulateMissing ||
+      (typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("missing") === "1");
+    const missingIds = isMissing ? ["ffmpeg", "engine"] : [];
 
-    const mockDetails: Record<string, { label: string; detail: string; state: string; link?: string }> = {
-      gpu: { label: "Graphics card", detail: "RTX 4050 Laptop · 6 GB", state: "ok" },
-      accel: { label: "Vulkan", detail: "1.3 · compute ready", state: "ok" },
+    const mockDetails: Record<string, { label: string; detail: string; state: string }> = {
+      system: { label: "System", detail: "Dev Mock · 64 GB free", state: "ok" },
+      gpu: { label: "Graphics", detail: "Detected graphics device", state: "ok" },
       ffmpeg: {
         label: "FFmpeg",
         detail: missingIds.includes("ffmpeg")
           ? "Not found · 85 MB to download"
-          : "9.0.2 · bundled",
+          : "Bundled",
         state: missingIds.includes("ffmpeg") ? "missing" : "ok",
       },
-      encoder: { label: "Video encoder", detail: "NVENC H.264 / H.265", state: "ok" },
-      system: { label: "Scratch disk", detail: "214 GB free", state: "ok" },
       engine: {
         label: "Interpolation engine",
         detail: missingIds.includes("engine")
           ? "Not found · 448 MB to download"
-          : "RIFE v4.6 · 448 MB",
+          : "RIFE",
         state: missingIds.includes("engine") ? "missing" : "ok",
       },
+      accel: { label: "GPU acceleration", detail: "Compute ready", state: "ok" },
+      encoder: { label: "Video encoder", detail: "Hardware encoder", state: "ok" },
     };
 
     if (isRM) {
@@ -492,17 +489,15 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
         }),
       );
       setSetupOk(missingIds.length === 0);
-      setSetupRunning(false);
       return;
     }
 
-    // Sequence check animation
     DEFAULT_ITEMS.forEach((item, i) => {
       window.setTimeout(() => {
         setCards((prev) =>
           prev.map((c) => (c.id === item.id ? { ...c, state: "checking" } : c)),
         );
-      }, 200 + i * 400);
+      }, 200 + i * 300);
 
       window.setTimeout(() => {
         const info = mockDetails[item.id];
@@ -511,14 +506,14 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
         );
         if (i === DEFAULT_ITEMS.length - 1) {
           setSetupOk(missingIds.length === 0);
-          setSetupRunning(false);
         }
-      }, 200 + i * 400 + 350);
+      }, 200 + i * 300 + 250);
     });
   };
 
-  // Simulate download for missing items in mock mode
+  // Simulate download for missing items in dev mock mode
   const handleDownloadCard = (id: string) => {
+    if (!import.meta.env.DEV) return;
     setCards((prev) =>
       prev.map((c) =>
         c.id === id ? { ...c, state: "installing", progress: 0 } : c,
@@ -527,15 +522,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
 
     let p = 0;
     const interval = window.setInterval(() => {
-      p += 15 + Math.random() * 20;
+      p += 25;
       if (p >= 100) {
-        p = 100;
         clearInterval(interval);
         setCards((prev) =>
           prev.map((c) => {
             if (c.id === id) {
-              const detail =
-                id === "ffmpeg" ? "9.0.2 · bundled" : "RIFE v4.6 · 448 MB";
+              const detail = id === "ffmpeg" ? "Bundled" : "RIFE";
               return { ...c, state: "ok", detail, progress: null };
             }
             return c;
@@ -552,6 +545,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   };
 
   const handleDownloadAll = () => {
+    if (!import.meta.env.DEV) return;
     cards.forEach((c) => {
       if (c.state === "missing") {
         handleDownloadCard(c.id);
@@ -665,10 +659,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
     return c;
   });
 
-  const gpuDisplayName =
+  const detectedGpu =
     setupConfig?.gpu?.name ||
-    setupConfig?.osGpus?.[0]?.name ||
-    "RTX 4050";
+    setupConfig?.osGpus?.[0]?.name;
+  const gpuDisplayName = detectedGpu || "your graphics card";
 
   return (
     <div className="ws">
@@ -758,7 +752,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
                         className={computeDevice === "gpu" ? "on" : ""}
                         onClick={() => setComputeDevice("gpu")}
                       >
-                        {gpuDisplayName} · GPU
+                        {detectedGpu ? `${gpuDisplayName} · GPU` : "GPU"}
                       </button>
                       <button
                         type="button"

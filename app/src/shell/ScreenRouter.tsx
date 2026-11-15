@@ -16,8 +16,6 @@ import type { SetupConfig } from "./setupTypes";
 interface ScreenContextExtendedValue extends ScreenContextValue {
   onboardingStep?: number;
   setOnboardingStep: (step: number) => void;
-  simulateMissing: boolean;
-  setSimulateMissing: (sim: boolean | ((prev: boolean) => boolean)) => void;
   allowGranted: boolean;
 }
 
@@ -54,13 +52,6 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
   const [allowGranted] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       return /allow=1/.test(window.location.search);
-    }
-    return false;
-  });
-
-  const [simulateMissing, setSimulateMissing] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      return /missing=1/.test(window.location.search);
     }
     return false;
   });
@@ -149,8 +140,6 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
         setTitle,
         onboardingStep,
         setOnboardingStep,
-        simulateMissing,
-        setSimulateMissing,
         allowGranted,
       }}
     >
@@ -165,8 +154,6 @@ export const ScreenRouter: React.FC = () => {
     setScreen,
     title,
     onboardingStep,
-    simulateMissing,
-    setSimulateMissing,
     allowGranted,
   } = useScreen();
 
@@ -188,7 +175,6 @@ export const ScreenRouter: React.FC = () => {
             onNavigate={setScreen}
             initialStep={onboardingStep}
             initialAllow={allowGranted}
-            simulateMissing={simulateMissing}
           />
         );
       case "ready":
@@ -241,13 +227,6 @@ export const ScreenRouter: React.FC = () => {
         >
           Done
         </button>
-        <span
-          className={`sim ${simulateMissing ? "on" : ""}`}
-          style={{ cursor: "pointer", marginLeft: 8 }}
-          onClick={() => setSimulateMissing((prev) => !prev)}
-        >
-          Simulate missing: {simulateMissing ? "on" : "off"}
-        </span>
       </div>
     </div>
   );
