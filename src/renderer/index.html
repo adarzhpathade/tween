@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; media-src 'self' file:; style-src 'self'; font-src 'self'">
+<title>Flowmotion</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand-cell"><div class="brand"><span class="dot"></span>flowmotion</div></div>
+  <nav class="crumbs">Projects / 00 Interpolate / <b>New video</b></nav>
+  <div class="badge-cell"><span id="gpuBadge" class="badge">Detecting GPU…</span></div>
+</header>
+
+<main class="main">
+  <div class="content">
+    <div class="wrap">
+
+      <div class="eyebrows">
+        <span>00 · Interpolate — step 1 of 3</span>
+        <span>Video · frame rate up-conversion</span>
+      </div>
+
+      <h1 class="title">Smooth it out</h1>
+      <p class="sub">Turn 24 or 30 fps footage into fluid 60 fps and beyond with AI frame interpolation.</p>
+
+      <div class="strip">
+        <div><span class="lbl">Source</span><b>Pick a video</b><span class="muted">drop a file below</span></div>
+        <div><span class="lbl">Engine</span><b>RIFE on Vulkan</b><span class="muted">runs on your GPU</span></div>
+        <div><span class="lbl">Output</span><b>MP4 with audio</b><span class="muted">original sound is kept</span></div>
+      </div>
+
+      <!-- 01 SOURCE -->
+      <section class="sec" id="s-source">
+        <div class="num">01</div>
+        <div class="body">
+          <h2>Source</h2>
+          <p class="lead">Start with the clip you want to smooth. <span class="muted">Everything is processed on this machine.</span></p>
+
+          <div id="drop" class="drop">
+            <h3 class="drop-title">Drop a video here</h3>
+            <p class="drop-line">Turn 24 / 30 fps footage into buttery 60 fps or more.</p>
+            <button id="browse" class="btn primary">Choose video</button>
+            <small>MP4 · MKV · MOV · AVI · WebM</small>
+          </div>
+
+          <div id="loaded" class="loaded hidden">
+            <div class="player"><video id="player" controls muted></video></div>
+            <div class="meta" id="meta"></div>
+            <div class="frames">
+              <div class="frames-head"><span>Frame timeline</span><span id="framesNote"></span></div>
+              <div id="timeline" class="timeline"></div>
+              <div class="legend"><i class="k src"></i>Original frames<i class="k gen"></i>Generated frames</div>
+            </div>
+          </div>
+
+          <div id="working" class="working hidden">
+            <div class="steps" id="steps">
+              <div class="step" data-s="extract"><b>01</b>Extract</div>
+              <div class="step" data-s="interpolate"><b>02</b>Interpolate</div>
+              <div class="step" data-s="encode"><b>03</b>Encode</div>
+            </div>
+            <div class="big" id="bigPct">0%</div>
+            <div class="bar"><div id="barFill"></div></div>
+            <div class="stats">
+              <div><label>Frames</label><span id="stFrames">—</span></div>
+              <div><label>Speed</label><span id="stSpeed">—</span></div>
+              <div><label>Elapsed</label><span id="stElapsed">0:00</span></div>
+              <div><label>Remaining</label><span id="stEta">—</span></div>
+            </div>
+            <div class="live"><img id="livePreview" alt=""><span id="liveHint" class="hint">Live preview appears once frames are generated</span></div>
+            <div><button id="cancel" class="btn ghost">Cancel</button></div>
+          </div>
+
+          <div id="result" class="result hidden">
+            <div class="player"><video id="resultPlayer" controls loop></video></div>
+            <div class="result-row">
+              <div><h3>Done</h3><p id="resultInfo"></p></div>
+              <div class="actions">
+                <button id="reveal" class="btn ghost">Show in folder</button>
+                <button id="again" class="btn primary">Process another</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="error" class="error hidden"></div>
+        </div>
+      </section>
+
+      <!-- 02-04 SETTINGS (locked while working) -->
+      <div id="panel" class="panel">
+
+        <section class="sec" id="s-target">
+          <div class="num">02</div>
+          <div class="body">
+            <h2>Target</h2>
+            <p class="lead">How many frames to add. <span class="muted">Some models only allow 2×.</span></p>
+            <div class="seg" id="targetSeg">
+              <button data-mode="multiplier" data-v="2" class="on">2×</button>
+              <button data-mode="multiplier" data-v="3">3×</button>
+              <button data-mode="multiplier" data-v="4">4×</button>
+              <button data-mode="fps" data-v="60">60 fps</button>
+              <button data-mode="fps" data-v="120">120 fps</button>
+            </div>
+            <div class="field inline">
+              <label for="customFps">Custom fps</label>
+              <input id="customFps" type="number" min="1" max="480" placeholder="e.g. 90">
+            </div>
+          </div>
+        </section>
+
+        <section class="sec" id="s-model">
+          <div class="num">03</div>
+          <div class="body">
+            <h2>Model</h2>
+            <p class="lead">The interpolation network. <span class="muted">Speed and quality trade off per model.</span></p>
+            <div class="cards" id="models"></div>
+          </div>
+        </section>
+
+        <section class="sec" id="s-output">
+          <div class="num">04</div>
+          <div class="body">
+            <h2>Output</h2>
+            <p class="lead">Encoding and file options. <span class="muted">Audio is copied unless you turn it off.</span></p>
+            <div class="field">
+              <label for="encoder">Encoder</label>
+              <select id="encoder"></select>
+            </div>
+            <div class="field">
+              <label for="quality">Quality <output id="qualityOut">18</output></label>
+              <input id="quality" type="range" min="12" max="30" value="18">
+              <div class="range-hint"><span>Larger file</span><span>Smaller file</span></div>
+            </div>
+            <label class="check"><input id="keepAudio" type="checkbox" checked><span>Keep original audio</span></label>
+            <label class="check"><input id="lossless" type="checkbox"><span>Lossless intermediates <em>(uses much more disk)</em></span></label>
+            <div class="summary" id="summary">Load a video to begin.</div>
+          </div>
+        </section>
+
+      </div>
+
+    </div>
+  </div>
+
+  <aside class="side">
+    <div class="side-block">
+      <div class="side-row"><span class="lbl">Progress</span><span class="side-pct">0%</span></div>
+      <div class="side-track"><i class="side-fill"></i></div>
+    </div>
+
+    <div class="side-block">
+      <div class="lbl">On this page</div>
+      <nav class="toc">
+        <a href="#s-source" class="on"><span class="n">01</span>Source</a>
+        <a href="#s-target"><span class="n">02</span>Target</a>
+        <a href="#s-model"><span class="n">03</span>Model</a>
+        <a href="#s-output"><span class="n">04</span>Output</a>
+      </nav>
+    </div>
+
+    <div class="side-foot">
+      <div class="lbl">Up next</div>
+      <p class="side-note">Output frames are generated locally.</p>
+      <button id="start" class="btn primary wide" disabled>Interpolate →</button>
+    </div>
+  </aside>
+</main>
+
+<footer class="foot">
+  <div><span class="theme-toggle" aria-hidden="true"></span>FLOWMOTION</div>
+  <div class="c">SET IN GEIST &amp; GEIST MONO</div>
+  <div class="r">RIFE · NCNN · VULKAN</div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
