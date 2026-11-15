@@ -7,6 +7,7 @@ pub mod plan;
 pub mod probe;
 pub mod runner;
 pub mod splitter;
+pub mod stats;
 pub mod types;
 
 pub use clean::clean_temp;
@@ -16,6 +17,7 @@ pub use plan::{chunk_size, cut_fixes, gcd, parse_rate, plan_chunks, ratio, rife_
 pub use probe::{colour_of, probe};
 pub use runner::{kill_tree, run_pipeline};
 pub use splitter::PngSplitter;
+pub use stats::{sample_system_stats, show_in_folder, SystemMonitorState, SystemStats};
 pub use types::{
     Chunk, ChunkPlan, ColourInfo, ColourInput, CutFix, GpuConfig, JobFinished, JobProgressEvent,
     JobRequest, PipelineConfig, ProbeInfo, RatioResult, RifeMapping, Target, TargetValue, Trim,

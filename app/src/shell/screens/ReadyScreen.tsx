@@ -1,35 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useScreen } from "../ScreenRouter";
-import type { Screen } from "../types";
+import type { Screen, ProbeInfo, ColourInfo, JobRequest } from "../types";
 
-export interface ColourInfo {
-  matrix: string;
-  range: string;
-  space: string;
-  primaries: string;
-  trc: string;
-  hdr: boolean;
-}
-
-export interface ProbeInfo {
-  file: string;
-  name: string;
-  width: number;
-  height: number;
-  codec: string;
-  pixFmt: string;
-  fpsNum: number;
-  fpsDen: number;
-  fps: number;
-  vfr: boolean;
-  duration: number;
-  frames: number;
-  hasAudio: boolean;
-  audioCodec?: string | null;
-  colour: ColourInfo;
-  size: number;
-}
+export type { ColourInfo, ProbeInfo };
 
 export interface GpuDevice {
   id: number;
@@ -118,19 +92,24 @@ function formatCodec(codec: string): string {
 }
 
 export interface ReadyScreenProps {
+  initialProbe?: ProbeInfo | null;
   onNavigate?: (screen: Screen) => void;
   onVideoLoaded?: (loaded: boolean) => void;
+  onStartJob?: (job: JobRequest) => void;
 }
 
 export const ReadyScreen: React.FC<ReadyScreenProps> = ({
+  initialProbe,
   onNavigate,
   onVideoLoaded,
+  onStartJob,
 }) => {
   const { setTitle } = useScreen();
 
   // The app starts strictly in the empty state (probeInfo = null).
   // Mock data is only allowed in DEV with explicit ?mock=1 query parameter.
   const [probeInfo, setProbeInfo] = useState<ProbeInfo | null>(() => {
+    if (initialProbe !== undefined) return initialProbe;
     if (import.meta.env.DEV && typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (params.get("mock") === "1") {
@@ -170,6 +149,12 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
   // Setup config from backend
   const [setupConfig, setSetupConfig] = useState<SetupConfig | null>(null);
+
+  useEffect(() => {
+    if (initialProbe !== undefined) {
+      setProbeInfo(initialProbe);
+    }
+  }, [initialProbe]);
 
   useEffect(() => {
     invoke<SetupConfig | null>("setup_config")
@@ -336,7 +321,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
   // Handle Start
   const handleStart = useCallback(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || !probeInfo) return;
     localStorage.setItem("tween_last_model", selectedModel);
     localStorage.setItem("tween_last_encoder", selectedEncoder);
     localStorage.setItem("tween_last_quality", String(quality));
@@ -344,8 +329,56 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     if (fpsChoice === "Custom") {
       localStorage.setItem("tween_last_custom_fps", String(customFps));
     }
-    onNavigate?.("processing");
-  }, [isLoaded, selectedModel, selectedEncoder, quality, fpsChoice, customFps, onNavigate]);
+
+    const tFps = targetFps || (sourceFps ? sourceFps * 2 : 48);
+    const dotIdx = probeInfo.name.lastIndexOf(".");
+    const baseName = dotIdx > 0 ? probeInfo.name.slice(0, dotIdx) : probeInfo.name;
+    const ext = dotIdx > 0 ? probeInfo.name.slice(dotIdx) : ".mp4";
+    const outFileName = `${baseName}_${Math.round(tFps)}fps${ext}`;
+    const normalizedFolder = outputFolder ? outputFolder.replace(/[\\/]+$/, "") : "";
+    const outPath = normalizedFolder ? `${normalizedFolder}/${outFileName}` : outFileName;
+
+    const targetMode = fpsChoice === "Custom" || fpsChoice === "60" || fpsChoice === "120" ? "fps" : "multiplier";
+    const targetVal = targetMode === "fps" ? tFps : fpsChoice === "3×" ? 3 : fpsChoice === "4×" ? 4 : 2;
+
+    const jobRequest: JobRequest = {
+      info: probeInfo,
+      target: {
+        mode: targetMode,
+        value: targetVal,
+      },
+      model: selectedModel,
+      encoder: selectedEncoder || setupConfig?.encoders?.[0] || "libx264",
+      quality: quality,
+      keepAudio: keepAudio,
+      output: outPath,
+      trim: inT > 0 || (outT > 0 && outT < duration) ? { start: inT, end: outT } : undefined,
+    };
+
+    if (onStartJob) {
+      onStartJob(jobRequest);
+    } else {
+      onNavigate?.("processing");
+    }
+  }, [
+    isLoaded,
+    probeInfo,
+    selectedModel,
+    selectedEncoder,
+    quality,
+    fpsChoice,
+    customFps,
+    targetFps,
+    sourceFps,
+    outputFolder,
+    setupConfig,
+    keepAudio,
+    inT,
+    outT,
+    duration,
+    onStartJob,
+    onNavigate,
+  ]);
 
   // I/O keyboard shortcuts for trim and Ctrl+Enter for start
   useEffect(() => {

@@ -24,6 +24,7 @@ regex = "1.10"
 tauri-plugin-dialog = "2"
 base64 = "0.22"
 rfd = "0.17"
+sysinfo = "0.40"
 
 [profile.release]
 codegen-units = 1
