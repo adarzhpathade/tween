@@ -158,7 +158,9 @@
   border: 1px solid var(--line2);
   background: #0b0b0bd9;
   backdrop-filter: blur(6px);
+  width: max-content;
   max-width: calc(100% - 24px);
+  overflow: visible;
 }
 
 .vpill {
@@ -169,6 +171,7 @@
   left: 0;
   width: 0;
   background: var(--text);
+  pointer-events: none;
   transition: transform var(--spring-d) var(--spring), width var(--spring-d) var(--spring);
 }
 
@@ -692,6 +695,7 @@
 .fseg.v .pill {
   position: absolute;
   z-index: 0;
+  top: 0;
   left: 0;
   right: 0;
   background: var(--text);
