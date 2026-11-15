@@ -485,7 +485,7 @@ mod tests {
             return;
         }
 
-        let work = std::env::temp_dir().join("tween-rust-e2e");
+        let work = std::env::temp_dir().join(format!("tween-rust-e2e-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&work);
         std::fs::create_dir_all(&work).unwrap();
 

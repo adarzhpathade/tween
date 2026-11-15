@@ -466,7 +466,7 @@ mod tests {
             return;
         }
 
-        let work = std::env::temp_dir().join("tween-test-extract");
+        let work = std::env::temp_dir().join(format!("tween-test-extract-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&work);
         std::fs::create_dir_all(&work).unwrap();
 
@@ -511,7 +511,7 @@ mod tests {
             return;
         }
 
-        let work = std::env::temp_dir().join("tween-test-thumbs");
+        let work = std::env::temp_dir().join(format!("tween-test-thumbs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&work);
         std::fs::create_dir_all(&work).unwrap();
 
