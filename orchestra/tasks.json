@@ -706,6 +706,14 @@
           "--",
           "-D",
           "warnings"
+        ],
+        [
+          "npx",
+          "--prefix",
+          "app",
+          "tauri",
+          "build",
+          "--no-bundle"
         ]
       ]
     },
@@ -802,6 +810,14 @@
           "--",
           "-D",
           "warnings"
+        ],
+        [
+          "npx",
+          "--prefix",
+          "app",
+          "tauri",
+          "build",
+          "--no-bundle"
         ]
       ]
     }
