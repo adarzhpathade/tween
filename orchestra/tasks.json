@@ -1,7 +1,7 @@
 {
   "project": "Tween (Tauri 2 + Rust + React/TypeScript)",
   "baseBranch": "main",
-  "maxParallel": 2,
+  "maxParallel": 4,
   "maxAttempts": 3,
   "timeout": "60m",
   "stallAfter": "15m",
@@ -521,6 +521,150 @@
       "id": "T15",
       "title": "Plain drop zone; decluttered custom fps editing",
       "brief": "briefs/T15-simplify.md",
+      "deps": [
+        "T14"
+      ],
+      "checks": [
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "install",
+          "--no-audit",
+          "--no-fund"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "build"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "typecheck"
+        ],
+        [
+          "cargo",
+          "test",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml"
+        ],
+        [
+          "cargo",
+          "clippy",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ]
+      ]
+    },
+    {
+      "id": "T16",
+      "title": "Rename Flowmotion to Tween; real default folders",
+      "brief": "briefs/T16-names-folders.md",
+      "deps": [
+        "T14"
+      ],
+      "checks": [
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "install",
+          "--no-audit",
+          "--no-fund"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "build"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "typecheck"
+        ],
+        [
+          "cargo",
+          "test",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml"
+        ],
+        [
+          "cargo",
+          "clippy",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ]
+      ]
+    },
+    {
+      "id": "T17",
+      "title": "Long-video, fractional fps, trim, scene-cut and cancel e2e tests",
+      "brief": "briefs/T17-long-video.md",
+      "deps": [
+        "T14"
+      ],
+      "checks": [
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "install",
+          "--no-audit",
+          "--no-fund"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "build"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "typecheck"
+        ],
+        [
+          "cargo",
+          "test",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml"
+        ],
+        [
+          "cargo",
+          "clippy",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ]
+      ]
+    },
+    {
+      "id": "T18",
+      "title": "Cross-platform CI, real setup downloads, AMD/Intel GPU parsing",
+      "brief": "briefs/T18-cross-platform-ci.md",
       "deps": [
         "T14"
       ],
