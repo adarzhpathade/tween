@@ -252,7 +252,13 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
     const btn = (view === "orig" ? origBtnRef.current : resBtnRef.current) ||
       (sw.querySelector("button.on") as HTMLElement | null);
-    if (!btn || btn.offsetWidth === 0) return;
+    if (!btn || btn.offsetWidth === 0) {
+      // Not measurable yet (stage hidden while the video loads): let CSS paint the
+      // selected chip itself so its dark text is never left on a dark background.
+      delete sw.dataset.pill;
+      return;
+    }
+    sw.dataset.pill = "1";
 
     const left = btn.offsetLeft;
     const width = btn.offsetWidth;
@@ -284,6 +290,9 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => syncViewPill(true));
     ro.observe(el);
+    // Watch the chips too: they go from 0 to real width when the stage becomes visible.
+    if (origBtnRef.current) ro.observe(origBtnRef.current);
+    if (resBtnRef.current) ro.observe(resBtnRef.current);
     if (document.fonts?.ready) {
       document.fonts.ready.then(() => syncViewPill(true));
     }
@@ -293,7 +302,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       ro.disconnect();
       window.removeEventListener("resize", onResize);
     };
-  }, [syncViewPill]);
+  }, [syncViewPill, isLoaded, probeInfo?.file]);
 
   const videoSrc = useMemo(() => {
     if (!probeInfo?.file) return "";

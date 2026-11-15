@@ -204,6 +204,15 @@
   background: transparent;
 }
 
+/* Until the sliding pill has been measured, the selected chip paints its own fill. */
+.vsw:not([data-pill="1"]) button.on {
+  background: var(--text);
+}
+
+.vsw:not([data-pill="1"]) .vpill {
+  opacity: 0;
+}
+
 .vsw button:not(.on):hover {
   color: var(--text);
 }
