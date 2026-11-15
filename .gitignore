@@ -11,3 +11,9 @@ Thumbs.db
 orchestra/runs/
 orchestra/STATUS.md
 .tween-task/
+
+# Tauri app
+app/node_modules/
+app/dist/
+app/src-tauri/target/
+
