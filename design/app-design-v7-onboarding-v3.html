@@ -760,6 +760,17 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 .nl:first-child{margin-top:4px}
 .nl b{font-weight:500;color:var(--text)}
 .nl span{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+/* simplify (user review): plain drop zone, no dot grid, no corner marks */
+.dz{background:var(--bg2);border-color:var(--line2)}
+.dz:hover,.dz.over{background:rgba(var(--acc-rgb),.03);border-color:rgba(var(--acc-rgb),.55)}
+.dz .cm{display:none}
+/* simplify (user review): custom fps editing shows only the number and one short line;
+   no steppers (Arrow keys and drag still work). The line replaces the FPS label. */
+.rv.edit .stp{display:none}
+.rv.edit > small{display:none}
+.fhint{position:static;right:auto;top:auto;z-index:auto;padding:0;margin-top:6px;background:none;border:0;box-shadow:none;
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);white-space:nowrap}
+.fhint.bad{color:var(--warn,#e0695a);border:0}
 </style>
 </head>
 <body>
@@ -1270,7 +1281,9 @@ function check(){const s=inp.value.trim();if(s==='')return{err:'Enter a number'}
   if(v<MINF)return{v,err:'Must be above '+SRC};
   if(v>MAXF)return{v,err:'Must be '+MAXF+' or less'};return{v};}
 function paintHint(){clearTimeout(hintTimer);const c=check();hint.classList.toggle('bad',!!c.err);rv.classList.toggle('bad',!!c.err);
-  if(!c.err)setGain(c.v);hint.textContent=c.err||'Enter to apply · Esc to cancel · '+MINF+'–'+MAXF;}
+  if(!c.err)setGain(c.v);
+  /* one short line that fits the strip: the valid range, or a short reason in red */
+  hint.textContent=!c.err?MINF+'–'+MAXF+' fps':(c.v===undefined?'Number':(c.v<MINF?'Min '+MINF:'Max '+MAXF));}
 function enterEdit(v,instant){if(editing)return;editing=true;prevBtn=btns.find(x=>x.classList.contains('on'));
   if(v===undefined&&customVal!==null)v=customVal;
   rv.classList.add('edit');frail.classList.add('editing');
