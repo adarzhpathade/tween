@@ -87,40 +87,14 @@ const KNOWN_MODELS: ModelCard[] = [
 const ENCODER_NAMES: Record<string, string> = {
   hevc_nvenc: "H.265 · NVENC",
   h264_nvenc: "H.264 · NVENC",
-  hevc_amf: "H.265 · AMF",
-  h264_amf: "H.264 · AMF",
+  hevc_amf: "H.265 · AMD",
+  h264_amf: "H.264 · AMD",
   hevc_qsv: "H.265 · Intel QSV",
   h264_qsv: "H.264 · Intel QSV",
   hevc_videotoolbox: "H.265 · Apple Silicon",
   h264_videotoolbox: "H.264 · Apple Silicon",
   libx265: "H.265 · CPU",
   libx264: "H.264 · CPU",
-};
-
-const MOCK_SAMPLE_PROBE: ProbeInfo = {
-  file: "beach_sunset_24fps.mp4",
-  name: "beach_sunset_24fps.mp4",
-  width: 1920,
-  height: 1080,
-  codec: "H.264",
-  pixFmt: "yuv420p",
-  fpsNum: 24,
-  fpsDen: 1,
-  fps: 24,
-  vfr: false,
-  duration: 42.0,
-  frames: 1008,
-  hasAudio: true,
-  audioCodec: "AAC",
-  colour: {
-    matrix: "bt709",
-    range: "tv",
-    space: "bt709",
-    primaries: "bt709",
-    trc: "bt709",
-    hdr: false,
-  },
-  size: 38 * 1024 * 1024,
 };
 
 function formatDuration(sec: number): string {
@@ -145,25 +119,54 @@ function formatCodec(codec: string): string {
 
 export interface ReadyScreenProps {
   onNavigate?: (screen: Screen) => void;
+  onVideoLoaded?: (loaded: boolean) => void;
 }
 
-export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
+export const ReadyScreen: React.FC<ReadyScreenProps> = ({
+  onNavigate,
+  onVideoLoaded,
+}) => {
   const { setTitle } = useScreen();
 
-  // Determine initial empty vs loaded state based on URL
+  // The app starts strictly in the empty state (probeInfo = null).
+  // Mock data is only allowed in DEV with explicit ?mock=1 query parameter.
   const [probeInfo, setProbeInfo] = useState<ProbeInfo | null>(() => {
-    if (typeof window !== "undefined") {
+    if (import.meta.env.DEV && typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const stateParam = params.get("state");
-      if (stateParam === "open") return null;
-      if (stateParam === "ready") return MOCK_SAMPLE_PROBE;
+      if (params.get("mock") === "1") {
+        return {
+          file: "beach_sunset_24fps.mp4",
+          name: "beach_sunset_24fps.mp4",
+          width: 1920,
+          height: 1080,
+          codec: "H.264",
+          pixFmt: "yuv420p",
+          fpsNum: 24,
+          fpsDen: 1,
+          fps: 24,
+          vfr: false,
+          duration: 42.0,
+          frames: 1008,
+          hasAudio: true,
+          audioCodec: "AAC",
+          colour: {
+            matrix: "bt709",
+            range: "tv",
+            space: "bt709",
+            primaries: "bt709",
+            trc: "bt709",
+            hdr: false,
+          },
+          size: 38 * 1024 * 1024,
+        };
+      }
     }
-    return MOCK_SAMPLE_PROBE;
+    return null;
   });
 
   const isLoaded = probeInfo !== null;
-  const sourceFps = probeInfo?.fps ?? 24;
-  const duration = probeInfo?.duration ?? 42.0;
+  const sourceFps = probeInfo ? probeInfo.fps : null;
+  const duration = probeInfo ? probeInfo.duration : 0;
 
   // Setup config from backend
   const [setupConfig, setSetupConfig] = useState<SetupConfig | null>(null);
@@ -171,13 +174,16 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
   useEffect(() => {
     invoke<SetupConfig | null>("setup_config")
       .then((cfg) => {
-        if (cfg) setSetupConfig(cfg);
+        if (cfg) {
+          setSetupConfig(cfg);
+        }
       })
       .catch(() => {});
   }, []);
 
-  // Update window title and data-file attribute on mount/update
+  // Notify parent and sync data-file / title
   useEffect(() => {
+    onVideoLoaded?.(isLoaded);
     setTitle(isLoaded ? probeInfo.name : "Tween");
     const win = document.querySelector(".win") as HTMLElement | null;
     if (win) {
@@ -186,16 +192,14 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
     return () => {
       if (win) win.dataset.file = undefined;
     };
-  }, [isLoaded, probeInfo?.name, setTitle]);
+  }, [isLoaded, probeInfo?.name, setTitle, onVideoLoaded]);
 
   // Poster frame preview
   const [posterUrl, setPosterUrl] = useState<string | null>(null);
   const [view, setView] = useState<"orig" | "res">("res");
 
-  // Output folder
-  const [outputFolder, setOutputFolder] = useState<string>(() => {
-    return "D:\\Videos\\Flowmotion";
-  });
+  // Output folder: starts empty until a video is probed or user picks one
+  const [outputFolder, setOutputFolder] = useState<string>("");
 
   // Settings persistence
   const [selectedModel, setSelectedModel] = useState<string>(() => {
@@ -203,7 +207,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
   });
 
   const [selectedEncoder, setSelectedEncoder] = useState<string>(() => {
-    return localStorage.getItem("tween_last_encoder") || "h264_nvenc";
+    return localStorage.getItem("tween_last_encoder") || "";
   });
 
   const [quality, setQuality] = useState<number>(() => {
@@ -222,13 +226,14 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
 
   const [customFps, setCustomFps] = useState<number>(() => {
     const saved = localStorage.getItem("tween_last_custom_fps");
-    return saved ? parseInt(saved, 10) : 90;
+    return saved ? parseInt(saved, 10) : 60;
   });
 
   const [isEditingCustom, setIsEditingCustom] = useState<boolean>(false);
 
-  // Compute target FPS
+  // Compute target FPS when video is loaded
   const targetFps = useMemo(() => {
+    if (!sourceFps) return null;
     switch (fpsChoice) {
       case "2×":
         return Math.round(sourceFps * 2);
@@ -246,14 +251,24 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
   }, [fpsChoice, sourceFps, customFps]);
 
   // Animated counting number for Target FPS
-  const [displayFps, setDisplayFps] = useState<number>(targetFps);
+  const [displayFps, setDisplayFps] = useState<number | null>(targetFps);
   const animRef = useRef<number>(0);
-  const prevFpsRef = useRef<number>(targetFps);
+  const prevFpsRef = useRef<number | null>(targetFps);
 
   useEffect(() => {
     const from = prevFpsRef.current;
     const to = targetFps;
     prevFpsRef.current = to;
+
+    if (to === null) {
+      setDisplayFps(null);
+      return;
+    }
+
+    if (from === null) {
+      setDisplayFps(to);
+      return;
+    }
 
     if (from === to) {
       setDisplayFps(to);
@@ -265,7 +280,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
 
     const tick = (now: number) => {
       const p = Math.min(1, (now - t0) / d);
-      // Cubic ease out
       const e = 1 - Math.pow(1 - p, 3);
       const val = Math.round(from + (to - from) * e);
       setDisplayFps(val);
@@ -282,33 +296,58 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
 
   // Trim editor state
   const [inT, setInT] = useState<number>(0);
-  const [outT, setOutT] = useState<number>(duration);
+  const [outT, setOutT] = useState<number>(0);
   const [playhead, setPlayhead] = useState<number>(0);
   const laneRef = useRef<HTMLDivElement | null>(null);
 
   // Keep trim in sync with duration changes
   useEffect(() => {
-    setInT(0);
-    setOutT(duration);
-    setPlayhead(0);
+    if (duration > 0) {
+      setInT(0);
+      setOutT(duration);
+      setPlayhead(0);
+    } else {
+      setInT(0);
+      setOutT(0);
+      setPlayhead(0);
+    }
   }, [duration]);
 
   const MIN_TRIM = 0.5;
 
   const handleSetIn = useCallback(() => {
-    setInT(Math.min(playhead, outT - MIN_TRIM));
-  }, [playhead, outT]);
+    if (duration > 0) {
+      setInT(Math.min(playhead, outT - MIN_TRIM));
+    }
+  }, [playhead, outT, duration]);
 
   const handleSetOut = useCallback(() => {
-    setOutT(Math.max(playhead, inT + MIN_TRIM));
-  }, [playhead, inT]);
+    if (duration > 0) {
+      setOutT(Math.max(playhead, inT + MIN_TRIM));
+    }
+  }, [playhead, inT, duration]);
 
   const handleResetTrim = useCallback(() => {
-    setInT(0);
-    setOutT(duration);
+    if (duration > 0) {
+      setInT(0);
+      setOutT(duration);
+    }
   }, [duration]);
 
-  // I/O keyboard shortcuts for trim
+  // Handle Start
+  const handleStart = useCallback(() => {
+    if (!isLoaded) return;
+    localStorage.setItem("tween_last_model", selectedModel);
+    localStorage.setItem("tween_last_encoder", selectedEncoder);
+    localStorage.setItem("tween_last_quality", String(quality));
+    localStorage.setItem("tween_last_fps_choice", fpsChoice);
+    if (fpsChoice === "Custom") {
+      localStorage.setItem("tween_last_custom_fps", String(customFps));
+    }
+    onNavigate?.("processing");
+  }, [isLoaded, selectedModel, selectedEncoder, quality, fpsChoice, customFps, onNavigate]);
+
+  // I/O keyboard shortcuts for trim and Ctrl+Enter for start
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -327,7 +366,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleSetIn, handleSetOut]);
+  }, [handleSetIn, handleSetOut, handleStart]);
 
   // Video loader function
   const loadVideo = useCallback(async (filePath: string) => {
@@ -339,6 +378,8 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
       const lastSlash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
       if (lastSlash > 0) {
         setOutputFolder(filePath.slice(0, lastSlash));
+      } else {
+        setOutputFolder(filePath);
       }
 
       // Extract poster frame
@@ -398,7 +439,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
         return;
       }
     } catch {
-      // Fallback to plugin-dialog
       try {
         const { open } = await import("@tauri-apps/plugin-dialog");
         const res = await open({
@@ -424,7 +464,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
   const handlePickFolder = useCallback(async () => {
     try {
       const picked = await invoke<string | null>("pick_output_folder", {
-        defaultPath: outputFolder,
+        defaultPath: outputFolder || undefined,
       });
       if (picked) {
         setOutputFolder(picked);
@@ -436,7 +476,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
         const res = await open({
           multiple: false,
           directory: true,
-          defaultPath: outputFolder,
+          defaultPath: outputFolder || undefined,
         });
         if (typeof res === "string") {
           setOutputFolder(res);
@@ -447,7 +487,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
     }
   }, [outputFolder]);
 
-  // Models list
+  // Models list read from setupConfig
   const availableModels = useMemo(() => {
     if (!setupConfig?.models || setupConfig.models.length === 0) {
       return KNOWN_MODELS;
@@ -456,17 +496,36 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
     return filtered.length > 0 ? filtered : KNOWN_MODELS;
   }, [setupConfig?.models]);
 
-  // Available encoders list
+  // Ensure selected model is one of the available models
+  useEffect(() => {
+    if (availableModels.length > 0 && !availableModels.some((m) => m.id === selectedModel)) {
+      setSelectedModel(availableModels[0].id);
+    }
+  }, [availableModels, selectedModel]);
+
+  // Available encoders list read from setupConfig
   const availableEncoders = useMemo(() => {
     if (!setupConfig?.encoders || setupConfig.encoders.length === 0) {
-      return ["hevc_nvenc", "h264_nvenc", "libx264"];
+      return [];
     }
     return setupConfig.encoders;
   }, [setupConfig?.encoders]);
 
-  const activeEncoderName = ENCODER_NAMES[selectedEncoder] || selectedEncoder;
+  // Sync selected encoder with availableEncoders
+  useEffect(() => {
+    if (availableEncoders.length > 0) {
+      if (!selectedEncoder || !availableEncoders.includes(selectedEncoder)) {
+        setSelectedEncoder(availableEncoders[0]);
+      }
+    }
+  }, [availableEncoders, selectedEncoder]);
+
+  const activeEncoderName = selectedEncoder
+    ? ENCODER_NAMES[selectedEncoder] || selectedEncoder
+    : "—";
 
   const handleCycleEncoder = useCallback(() => {
+    if (availableEncoders.length === 0) return;
     const idx = availableEncoders.indexOf(selectedEncoder);
     const nextIdx = (idx + 1) % availableEncoders.length;
     const nextEnc = availableEncoders[nextIdx];
@@ -483,11 +542,12 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
   }, [quality]);
 
   // Estimates calculation
-  const trimDuration = Math.max(0.1, outT - inT);
-  const trimFrames = Math.round(trimDuration * sourceFps);
-  const estFrames = Math.round(trimFrames * (targetFps / sourceFps));
+  const trimDuration = isLoaded ? Math.max(0.1, outT - inT) : 0;
+  const trimFrames = isLoaded && sourceFps ? Math.round(trimDuration * sourceFps) : 0;
+  const estFrames = isLoaded && sourceFps && targetFps ? Math.round(trimFrames * (targetFps / sourceFps)) : 0;
 
   const estTime = useMemo(() => {
+    if (!isLoaded || !estFrames) return "—";
     let speedFps = 38;
     if (setupConfig?.gpu?.ms && setupConfig.gpu.ms > 0) {
       const ms = setupConfig.gpu.ms;
@@ -498,11 +558,12 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${m}m ${String(s).padStart(2, "0")}s`;
-  }, [setupConfig?.gpu?.ms, probeInfo?.width, probeInfo?.height, estFrames]);
+  }, [isLoaded, estFrames, setupConfig?.gpu?.ms, probeInfo?.width, probeInfo?.height]);
 
   const estSizeMB = useMemo(() => {
-    return Math.max(1, Math.round((trimDuration * 1.24 * targetFps) / 48));
-  }, [trimDuration, targetFps]);
+    if (!isLoaded || !targetFps) return "—";
+    return String(Math.max(1, Math.round((trimDuration * 1.24 * targetFps) / 48)));
+  }, [isLoaded, trimDuration, targetFps]);
 
   // Warnings
   const warnings = useMemo(() => {
@@ -519,28 +580,16 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
     return list;
   }, [probeInfo?.colour?.hdr, probeInfo?.vfr, setupConfig?.mode]);
 
-  // Handle Interpolate start
-  const handleStart = useCallback(() => {
-    if (!isLoaded) return;
-    // Persist selections
-    localStorage.setItem("tween_last_model", selectedModel);
-    localStorage.setItem("tween_last_encoder", selectedEncoder);
-    localStorage.setItem("tween_last_quality", String(quality));
-    localStorage.setItem("tween_last_fps_choice", fpsChoice);
-    if (fpsChoice === "Custom") {
-      localStorage.setItem("tween_last_custom_fps", String(customFps));
-    }
-    onNavigate?.("processing");
-  }, [isLoaded, selectedModel, selectedEncoder, quality, fpsChoice, customFps, onNavigate]);
-
-  // Folder name
+  // Folder name display
   const folderName = useMemo(() => {
+    if (!outputFolder) return "—";
     const parts = outputFolder.split(/[\\/]/).filter(Boolean);
-    return parts[parts.length - 1] || "Output";
+    return parts[parts.length - 1] || "—";
   }, [outputFolder]);
 
   // Ruler tick items for timeline
   const rulerTicks = useMemo(() => {
+    if (!isLoaded || duration <= 0) return [];
     const step = duration > 120 ? 30 : duration > 60 ? 10 : 6;
     const ticks: { pos: number; label: string }[] = [];
     for (let s = 0; s <= duration; s += step) {
@@ -550,7 +599,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
       });
     }
     return ticks;
-  }, [duration]);
+  }, [isLoaded, duration]);
 
   // Pill highlight for vertical rail
   const railButtons = ["2×", "3×", "4×", "60", "120", "Custom"] as const;
@@ -568,6 +617,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
 
   // Lane pointer handlers for trim
   const handleLanePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isLoaded || duration <= 0) return;
     if ((e.target as HTMLElement).closest(".hdl")) return;
     const rect = laneRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -589,6 +639,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
   };
 
   const handleInHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isLoaded || duration <= 0) return;
     e.stopPropagation();
     e.preventDefault();
     const rect = laneRef.current?.getBoundingClientRect();
@@ -610,6 +661,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
   };
 
   const handleOutHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isLoaded || duration <= 0) return;
     e.stopPropagation();
     e.preventDefault();
     const rect = laneRef.current?.getBoundingClientRect();
@@ -680,7 +732,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
                   className={view === "orig" ? "on" : ""}
                   onClick={() => setView("orig")}
                 >
-                  Original <small>{Math.round(sourceFps)} fps</small>
+                  Original <small>{sourceFps ? `${Math.round(sourceFps)} fps` : "—"}</small>
                 </button>
                 <button
                   type="button"
@@ -688,7 +740,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
                   className={view === "res" ? "on" : ""}
                   onClick={() => setView("res")}
                 >
-                  Interpolated <small id="tagTo">{Math.round(targetFps)} fps</small>
+                  Interpolated <small id="tagTo">{targetFps ? `${Math.round(targetFps)} fps` : "—"}</small>
                 </button>
               </div>
             </div>
@@ -738,79 +790,111 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
               <span className="lbl">Trim</span>
               <span className="rd">
                 <span>In</span>
-                <b id="tIn">{formatTrimTime(inT)}</b>
+                <b id="tIn">{isLoaded ? formatTrimTime(inT) : "—"}</b>
               </span>
               <span className="rd">
                 <span>Out</span>
-                <b id="tOut">{formatTrimTime(outT)}</b>
+                <b id="tOut">{isLoaded ? formatTrimTime(outT) : "—"}</b>
               </span>
               <span className="rd len">
                 <span>Length</span>
-                <b id="tLen">{formatTrimTime(trimDuration)}</b>
+                <b id="tLen">{isLoaded ? formatTrimTime(trimDuration) : "—"}</b>
               </span>
               <span className="rd">
                 <span>Frames</span>
-                <b id="tFr">{trimFrames.toLocaleString()}</b>
+                <b id="tFr">{isLoaded ? trimFrames.toLocaleString() : "—"}</b>
               </span>
             </div>
             <div className="tbs">
-              <button type="button" className="tbn" id="trIn" onClick={handleSetIn}>
+              <button
+                type="button"
+                className="tbn"
+                id="trIn"
+                onClick={handleSetIn}
+                disabled={!isLoaded}
+              >
                 Set in <kbd>I</kbd>
               </button>
-              <button type="button" className="tbn" id="trOut" onClick={handleSetOut}>
+              <button
+                type="button"
+                className="tbn"
+                id="trOut"
+                onClick={handleSetOut}
+                disabled={!isLoaded}
+              >
                 Set out <kbd>O</kbd>
               </button>
-              <button type="button" className="tbn mute" id="trReset" onClick={handleResetTrim}>
+              <button
+                type="button"
+                className="tbn mute"
+                id="trReset"
+                onClick={handleResetTrim}
+                disabled={!isLoaded}
+              >
                 Reset
               </button>
             </div>
           </div>
 
-          <div className="lane" id="lane" ref={laneRef} onPointerDown={handleLanePointerDown}>
-            <div className="film" id="film">
-              {Array.from({ length: 150 }).map((_, i) => (
-                <i key={i} />
-              ))}
-            </div>
-            <div className="shade" id="shL" style={{ width: `${(inT / duration) * 100}%` }} />
-            <div className="shade" id="shR" style={{ width: `${Math.max(0, 100 - (outT / duration) * 100)}%` }} />
-            <div
-              className="sel"
-              id="sel"
-              style={{
-                left: `${(inT / duration) * 100}%`,
-                width: `${Math.max(0, ((outT - inT) / duration) * 100)}%`,
-              }}
-            />
-            <div
-              className="hdl in"
-              id="hIn"
-              style={{ left: `${(inT / duration) * 100}%` }}
-              onPointerDown={handleInHandlePointerDown}
-            >
-              <span className="tip" id="tipIn">
-                {formatTrimTime(inT)}
-              </span>
-            </div>
-            <div
-              className="hdl out"
-              id="hOut"
-              style={{ left: `${(outT / duration) * 100}%` }}
-              onPointerDown={handleOutHandlePointerDown}
-            >
-              <span className="tip" id="tipOut">
-                {formatTrimTime(outT)}
-              </span>
-            </div>
-            <div className="ph" id="ph" style={{ left: `${(playhead / duration) * 100}%` }} />
+          <div
+            className="lane"
+            id="lane"
+            ref={laneRef}
+            onPointerDown={isLoaded ? handleLanePointerDown : undefined}
+          >
+            {isLoaded && (
+              <>
+                <div className="film" id="film">
+                  {Array.from({ length: 150 }).map((_, i) => (
+                    <i key={i} />
+                  ))}
+                </div>
+                <div className="shade" id="shL" style={{ width: `${(inT / duration) * 100}%` }} />
+                <div
+                  className="shade"
+                  id="shR"
+                  style={{ width: `${Math.max(0, 100 - (outT / duration) * 100)}%` }}
+                />
+                <div
+                  className="sel"
+                  id="sel"
+                  style={{
+                    left: `${(inT / duration) * 100}%`,
+                    width: `${Math.max(0, ((outT - inT) / duration) * 100)}%`,
+                  }}
+                />
+                <div
+                  className="hdl in"
+                  id="hIn"
+                  style={{ left: `${(inT / duration) * 100}%` }}
+                  onPointerDown={handleInHandlePointerDown}
+                >
+                  <span className="tip" id="tipIn">
+                    {formatTrimTime(inT)}
+                  </span>
+                </div>
+                <div
+                  className="hdl out"
+                  id="hOut"
+                  style={{ left: `${(outT / duration) * 100}%` }}
+                  onPointerDown={handleOutHandlePointerDown}
+                >
+                  <span className="tip" id="tipOut">
+                    {formatTrimTime(outT)}
+                  </span>
+                </div>
+                <div className="ph" id="ph" style={{ left: `${(playhead / duration) * 100}%` }} />
+              </>
+            )}
           </div>
 
           <div className="rul" id="rul">
-            {rulerTicks.map((tick, i) => (
-              <span key={i} style={{ left: `${tick.pos}%` }}>
-                {tick.label}
-              </span>
-            ))}
+            {isLoaded &&
+              rulerTicks.map((tick, i) => (
+                <span key={i} style={{ left: `${tick.pos}%` }}>
+                  {tick.label}
+                </span>
+              ))}
           </div>
         </div>
       </section>
@@ -820,10 +904,11 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
         <span className="lbl">Frame rate</span>
         <div className="rv">
           <div className="fr0">
-            {Math.round(sourceFps)} <i>→</i>
+            {isLoaded && sourceFps ? `${Math.round(sourceFps)} ` : "— "}
+            <i>→</i>
           </div>
           <div className="fr1" id="fpsTo">
-            {displayFps}
+            {isLoaded && displayFps !== null ? displayFps : "—"}
           </div>
           <small>fps</small>
         </div>
@@ -839,7 +924,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
             }}
           >
             <b>2×</b>
-            <span>{Math.round(sourceFps * 2)} fps</span>
+            <span>{isLoaded && sourceFps ? `${Math.round(sourceFps * 2)} fps` : "Double"}</span>
           </button>
           <button
             type="button"
@@ -850,7 +935,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
             }}
           >
             <b>3×</b>
-            <span>{Math.round(sourceFps * 3)} fps</span>
+            <span>{isLoaded && sourceFps ? `${Math.round(sourceFps * 3)} fps` : "Triple"}</span>
           </button>
           <button
             type="button"
@@ -861,7 +946,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
             }}
           >
             <b>4×</b>
-            <span>{Math.round(sourceFps * 4)} fps</span>
+            <span>{isLoaded && sourceFps ? `${Math.round(sourceFps * 4)} fps` : "Quad"}</span>
           </button>
           <button
             type="button"
@@ -898,7 +983,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
               <input
                 type="number"
                 className="custom-fps-input"
-                min={Math.floor(sourceFps) + 1}
+                min={isLoaded && sourceFps ? Math.floor(sourceFps) + 1 : 1}
                 max={240}
                 value={customFps}
                 onClick={(e) => e.stopPropagation()}
@@ -909,26 +994,34 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
                   }
                 }}
                 onBlur={() => {
-                  if (customFps <= sourceFps) {
+                  if (isLoaded && sourceFps && customFps <= sourceFps) {
                     setCustomFps(Math.max(1, Math.min(240, Math.floor(sourceFps) + 1)));
                   } else if (customFps > 240) {
                     setCustomFps(240);
+                  } else if (customFps < 1) {
+                    setCustomFps(1);
                   }
                   setIsEditingCustom(false);
                 }}
                 autoFocus
               />
             ) : (
-              <span>{customFps} fps</span>
+              <span>{isLoaded && customFps ? `${customFps} fps` : "fps"}</span>
             )}
           </button>
         </div>
 
         <div className="gainv">
           <b id="gainT">
-            +{Math.max(0, Math.round(targetFps - sourceFps))} frames
-            <br />
-            every second
+            {isLoaded && sourceFps && targetFps ? (
+              <>
+                +{Math.max(0, Math.round(targetFps - sourceFps))} frames
+                <br />
+                every second
+              </>
+            ) : (
+              "—"
+            )}
           </b>
         </div>
       </aside>
@@ -936,7 +1029,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
       {/* Inspector / Settings (Column 3) */}
       <aside className="insp" id="insp" data-file={isLoaded ? "loaded" : "none"}>
         <div className="iscroll">
-          {/* Quiet warnings */}
+          {/* Warnings */}
           {warnings.length > 0 && (
             <div className="grp" style={{ padding: "12px 24px" }}>
               {warnings.map((w, idx) => (
@@ -977,7 +1070,11 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
           {/* Output settings */}
           <div className="grp">
             <div className="lbl">Output</div>
-            <div className="row" onClick={handleCycleEncoder} style={{ cursor: "pointer" }}>
+            <div
+              className="row"
+              onClick={availableEncoders.length > 0 ? handleCycleEncoder : undefined}
+              style={{ cursor: availableEncoders.length > 0 ? "pointer" : "default" }}
+            >
               <span>Encoder</span>
               <b>{activeEncoderName}</b>
             </div>
@@ -1003,7 +1100,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
               </svg>
               <div>
                 <b id="outName">{folderName}</b>
-                <small id="outPath">{outputFolder}</small>
+                <small id="outPath">{outputFolder || "No folder chosen"}</small>
               </div>
               <span>Choose</span>
             </button>
@@ -1014,13 +1111,13 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({ onNavigate }) => {
         <div className="ifoot">
           <div className="est nv">
             <span>
-              ~ <b id="estT">{estTime}</b>
+              ~ <b id="estT">{isLoaded ? estTime : "—"}</b>
             </span>
             <span>
-              <b id="estF">{estFrames.toLocaleString()}</b> frames
+              <b id="estF">{isLoaded ? estFrames.toLocaleString() : "—"}</b> frames
             </span>
             <span>
-              ~ <b id="estS">{estSizeMB}</b> MB
+              ~ <b id="estS">{isLoaded ? `${estSizeMB}` : "—"}</b> MB
             </span>
           </div>
 
