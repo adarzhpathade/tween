@@ -54,11 +54,22 @@ fn load_or_default_config(app: &tauri::AppHandle) -> PipelineConfig {
     PipelineConfig::default()
 }
 
+// ==========================================================================
+// Asset protocol runtime scope policy:
+// Static scope in tauri.conf.json is strictly empty (security.assetProtocol.scope: []).
+// We grant runtime access only to specific files the user opened or that the app generates:
+// - Source video file explicitly probed or chosen by the user
+// - Specific preview frame images emitted during interpolation
+// - Target output video file produced by the job
+// We NEVER allow broad directories like std::env::temp_dir() or the user's temp root.
+// ==========================================================================
+
 #[tauri::command]
 pub async fn probe_video(
     app: tauri::AppHandle,
     path: String,
 ) -> Result<ProbeInfo, String> {
+    // Runtime scope: allow only the specific source video file the user opened
     let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&path));
     let cfg = load_or_default_config(&app);
     probe(&cfg, &path).await
@@ -70,6 +81,7 @@ pub async fn extract_frame(
     path: String,
     time: Option<f64>,
 ) -> Result<String, String> {
+    // Runtime scope: allow only the specific source video file the user opened
     let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&path));
     let cfg = load_or_default_config(&app);
     probe::extract_frame(&cfg, &path, time).await
@@ -82,6 +94,7 @@ pub async fn extract_thumbnails(
     count: usize,
     height: u32,
 ) -> Result<Vec<String>, String> {
+    // Runtime scope: allow only the specific source video file the user opened
     let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&path));
     let cfg = load_or_default_config(&app);
     probe::extract_thumbnails(&cfg, &path, count, height).await
@@ -94,6 +107,7 @@ pub async fn pick_video_file(app: tauri::AppHandle) -> Result<Option<String>, St
         .pick_file()
         .await;
     if let Some(ref f) = file {
+        // Runtime scope: allow only the specific file chosen by the user via file picker
         let _ = app.asset_protocol_scope().allow_file(f.path());
     }
     Ok(file.map(|f| f.path().to_string_lossy().to_string()))
@@ -131,13 +145,10 @@ pub async fn start_job(
         None => load_or_default_config(&app),
     };
 
+    // Runtime scope: allow the user's source video file and target output file.
+    // Note: broad temp folders are never allowed to preserve narrow least-privilege scoping.
     let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&job.info.file));
     let _ = app.asset_protocol_scope().allow_file(std::path::Path::new(&job.output));
-    if let Some(ref tr) = job.temp_root {
-        let _ = app.asset_protocol_scope().allow_directory(std::path::Path::new(tr), true);
-    } else {
-        let _ = app.asset_protocol_scope().allow_directory(std::env::temp_dir(), true);
-    }
 
     let app_clone = app.clone();
     let state_clone = state.inner().0.clone();
@@ -146,6 +157,12 @@ pub async fn start_job(
         use tauri::Emitter;
         let emit_app = app_clone.clone();
         let emit = move |evt: JobProgressEvent| {
+            // Runtime scope: allow each individual preview frame file as it is emitted
+            if let Some(ref prev) = evt.preview {
+                let _ = emit_app
+                    .asset_protocol_scope()
+                    .allow_file(std::path::Path::new(prev));
+            }
             let _ = emit_app.emit("job-progress", evt);
         };
 
