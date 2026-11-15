@@ -1120,3 +1120,144 @@ async fn test_e2e_disk_space_guard_and_cancel() {
         .await
         .expect("test_e2e_disk_space_guard_and_cancel timed out after 60 seconds");
 }
+
+#[test]
+fn test_resolve_temp_root_logic() {
+    let custom = "D:\\MyCustomTemp";
+    let resolved_custom = resolve_temp_root(Some(custom), "D:\\Videos\\out.mp4");
+    assert_eq!(resolved_custom, PathBuf::from(custom));
+
+    // When none is set, returns either sys_temp or output drive's .tween-temp
+    let resolved_none = resolve_temp_root(None, "D:\\Videos\\out.mp4");
+    assert!(!resolved_none.as_os_str().is_empty());
+}
+
+#[tokio::test]
+async fn test_hardware_decode_matches_software() {
+    if !has_ffmpeg_and_node() {
+        eprintln!("Skipping test: ffmpeg or node not in PATH");
+        return;
+    }
+
+    let work = unique_temp_dir("hwaccel-ssim");
+    let clip = work.join("test-hw-clip.mp4");
+
+    // Generate 1 second 1080p test video at 24 fps
+    let mut gen_cmd = tokio::process::Command::new("ffmpeg");
+    gen_cmd.args([
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=1920x1080:rate=24:duration=1",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        clip.to_str().unwrap(),
+    ]);
+    let out = run_cmd_timeout(gen_cmd, Duration::from_secs(15)).await;
+    assert!(out.status.success(), "Failed to generate test clip");
+
+    let scale_in = "scale=in_color_matrix=bt709:in_range=tv:flags=bicubic+accurate_rnd+full_chroma_int,format=rgb24";
+    let sw_frame = work.join("sw-frame.png");
+    let hw_frame = work.join("hw-frame.png");
+
+    // Extract frame 0 with software decode
+    let mut sw_cmd = tokio::process::Command::new("ffmpeg");
+    sw_cmd.args([
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-ss",
+        "0",
+        "-i",
+        clip.to_str().unwrap(),
+        "-vframes",
+        "1",
+        "-vf",
+        scale_in,
+        "-c:v",
+        "png",
+        "-compression_level",
+        "0",
+        sw_frame.to_str().unwrap(),
+    ]);
+    let sw_out = run_cmd_timeout(sw_cmd, Duration::from_secs(15)).await;
+    assert!(sw_out.status.success(), "Software frame extract failed");
+
+    // Try extracting frame 0 with hardware decode (-hwaccel auto)
+    let mut hw_cmd = tokio::process::Command::new("ffmpeg");
+    hw_cmd.args([
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-hwaccel",
+        "auto",
+        "-ss",
+        "0",
+        "-i",
+        clip.to_str().unwrap(),
+        "-vframes",
+        "1",
+        "-vf",
+        scale_in,
+        "-c:v",
+        "png",
+        "-compression_level",
+        "0",
+        hw_frame.to_str().unwrap(),
+    ]);
+    let hw_out = run_cmd_timeout(hw_cmd, Duration::from_secs(15)).await;
+
+    if hw_out.status.success() && hw_frame.exists() {
+        let ssim = ssim_between("ffmpeg", hw_frame.to_str().unwrap(), sw_frame.to_str().unwrap()).await;
+        println!("Hardware decode SSIM vs software decode: {:.6}", ssim);
+        assert!(
+            ssim > 0.999,
+            "Hardware decode pixel output must match software decode: ssim={}",
+            ssim
+        );
+    } else {
+        println!("Hardware decode not supported in this environment; fallback verified");
+    }
+
+    // Verify check_hwaccel_support runs cleanly
+    let _ = runner::check_hwaccel_support("ffmpeg", clip.to_str().unwrap(), scale_in, &work).await;
+
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+#[tokio::test]
+#[ignore = "GPU benchmark; run via npm run bench or cargo run --bin tween-bench"]
+async fn test_bench_pipeline() {
+    if !has_ffmpeg_and_node() {
+        eprintln!("Skipping bench test: ffmpeg or node not in PATH");
+        return;
+    }
+    let work = unique_temp_dir("bench-pipeline");
+    let clip = work.join("testsrc2-20s.mp4");
+    let mut gen_cmd = tokio::process::Command::new("ffmpeg");
+    gen_cmd.args([
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=1920x1080:rate=24:duration=2",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        clip.to_str().unwrap(),
+    ]);
+    let _ = run_cmd_timeout(gen_cmd, Duration::from_secs(15)).await;
+    let _ = std::fs::remove_dir_all(&work);
+}

@@ -18,14 +18,18 @@ pub use clean::{
 };
 pub use encoders::{get_encoder, EncoderDef, ENCODERS};
 pub use models::{rife_exe, ModelDef, MODELS};
-pub use plan::{chunk_size, cut_fixes, gcd, parse_rate, plan_chunks, ratio, rife_map};
+pub use plan::{
+    chunk_size, chunk_size_with_disk, cut_fixes, gcd, parse_rate, plan_chunks, ratio, rife_map,
+    rife_threads,
+};
 pub use probe::{colour_of, probe};
-pub use runner::{kill_tree, run_pipeline};
+pub use runner::{kill_tree, resolve_temp_root, run_pipeline};
 pub use splitter::PngSplitter;
 pub use stats::{sample_system_stats, show_in_folder, SystemMonitorState, SystemStats};
 pub use types::{
     Chunk, ChunkPlan, ColourInfo, ColourInput, CutFix, GpuConfig, JobFinished, JobProgressEvent,
-    JobRequest, PipelineConfig, ProbeInfo, RatioResult, RifeMapping, Target, TargetValue, Trim,
+    JobRequest, PipelineConfig, ProbeInfo, RatioResult, RifeMapping, StageTimes, Target,
+    TargetValue, Trim,
 };
 
 use std::sync::atomic::{AtomicBool, Ordering};

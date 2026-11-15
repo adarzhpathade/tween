@@ -207,6 +207,15 @@ pub struct JobProgressEvent {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StageTimes {
+    pub analyse_ms: u64,
+    pub extract_ms: u64,
+    pub rife_ms: u64,
+    pub encode_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JobFinished {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -223,4 +232,8 @@ pub struct JobFinished {
     pub frames: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cuts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peak_temp_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_times: Option<StageTimes>,
 }

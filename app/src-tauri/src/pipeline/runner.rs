@@ -1,14 +1,15 @@
+use super::clean::dir_size;
 use super::encoders::get_encoder;
 use super::models::{rife_exe, MODELS};
-use super::plan::{chunk_size, cut_fixes, plan_chunks, ratio};
+use super::plan::{chunk_size_with_disk, cut_fixes, plan_chunks, ratio, rife_threads};
 use super::probe::colour_of;
 use super::splitter::PngSplitter;
 use super::types::{
-    ColourInput, JobFinished, JobProgressEvent, JobRequest, PipelineConfig,
+    ColourInput, JobFinished, JobProgressEvent, JobRequest, PipelineConfig, StageTimes,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -99,6 +100,273 @@ impl ActiveProcesses {
     }
 }
 
+pub fn resolve_temp_root(custom_temp: Option<&str>, output_path: &str) -> PathBuf {
+    if let Some(r) = custom_temp {
+        let trimmed = r.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    let sys_temp = std::env::temp_dir();
+    let out_p = Path::new(output_path);
+    let out_dir = if let Some(parent) = out_p.parent() {
+        if parent.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            parent.to_path_buf()
+        }
+    } else {
+        PathBuf::from(".")
+    };
+
+    let mut check_dir = out_dir.clone();
+    while !check_dir.exists() {
+        if let Some(parent) = check_dir.parent() {
+            if parent == check_dir {
+                break;
+            }
+            check_dir = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+
+    let sys_free = crate::setup::free_disk_space(&sys_temp).unwrap_or(0);
+    let out_free = crate::setup::free_disk_space(&check_dir).unwrap_or(0);
+
+    if out_free > sys_free {
+        out_dir.join(".tween-temp")
+    } else {
+        sys_temp
+    }
+}
+
+pub struct ExtractorHandle {
+    pub child: tokio::process::Child,
+    pub pid: u32,
+    pub task: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Clone)]
+pub struct ExtractorSync {
+    pub pool: PathBuf,
+    pub written: Arc<AtomicUsize>,
+    pub released: Arc<AtomicUsize>,
+    pub max_ahead: usize,
+    pub notify_waiters: Arc<tokio::sync::Notify>,
+    pub notify_capacity: Arc<tokio::sync::Notify>,
+    pub cancel: Arc<AtomicBool>,
+    pub ended: Arc<AtomicBool>,
+    pub failed: Arc<Mutex<Option<String>>>,
+}
+
+pub fn spawn_streaming_extractor(
+    ffmpeg: &str,
+    file: &str,
+    trim_args: &[String],
+    scale_in: &str,
+    use_hwaccel: bool,
+    sync: ExtractorSync,
+) -> Result<ExtractorHandle, String> {
+    let mut ext_cmd = tokio::process::Command::new(ffmpeg);
+    ext_cmd.args(["-v", "error"]);
+    if use_hwaccel {
+        ext_cmd.args(["-hwaccel", "auto"]);
+    }
+    ext_cmd.args(trim_args);
+    ext_cmd.args([
+        "-i",
+        file,
+        "-map",
+        "0:v:0",
+        "-fps_mode",
+        "passthrough",
+        "-an",
+        "-sn",
+        "-vf",
+        scale_in,
+        "-f",
+        "image2pipe",
+        "-c:v",
+        "png",
+        "-compression_level",
+        "0",
+        "-",
+    ]);
+    ext_cmd.stdout(std::process::Stdio::piped());
+    ext_cmd.stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        ext_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut ext_child = ext_cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start extractor: {}", e))?;
+    let ext_pid = ext_child.id().unwrap_or(0);
+    let mut ext_stdout = ext_child
+        .stdout
+        .take()
+        .ok_or("Failed to open extractor stdout")?;
+
+    let task = tokio::spawn(async move {
+        let mut splitter = PngSplitter::new();
+        let mut buf = vec![0u8; 262_144];
+
+        loop {
+            if sync.cancel.load(Ordering::SeqCst) {
+                break;
+            }
+            while sync.written.load(Ordering::SeqCst).saturating_sub(sync.released.load(Ordering::SeqCst)) > sync.max_ahead {
+                if sync.cancel.load(Ordering::SeqCst) {
+                    break;
+                }
+                tokio::select! {
+                    _ = sync.notify_capacity.notified() => {},
+                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(50)) => {}
+                }
+            }
+
+            match ext_stdout.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    splitter.push(&buf[..n], |img| {
+                        let idx = sync.written.fetch_add(1, Ordering::SeqCst);
+                        let file_name = format!("{:08}.png", idx + 1);
+                        let _ = std::fs::write(sync.pool.join(file_name), &img);
+                        sync.notify_waiters.notify_waiters();
+                    });
+                }
+                Err(e) => {
+                    let mut lock = sync.failed.lock().await;
+                    *lock = Some(format!("Extractor read error: {}", e));
+                    break;
+                }
+            }
+        }
+        sync.ended.store(true, Ordering::SeqCst);
+        sync.notify_waiters.notify_waiters();
+    });
+
+    Ok(ExtractorHandle {
+        child: ext_child,
+        pid: ext_pid,
+        task,
+    })
+}
+
+pub async fn check_hwaccel_support(ffmpeg: &str, file: &str, scale_in: &str, tmp: &Path) -> bool {
+    let sw_path = tmp.join("test-sw.png");
+    let hw_path = tmp.join("test-hw.png");
+
+    let mut sw_cmd = tokio::process::Command::new(ffmpeg);
+    sw_cmd.args([
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-ss",
+        "0",
+        "-i",
+        file,
+        "-vframes",
+        "1",
+        "-vf",
+        scale_in,
+        "-c:v",
+        "png",
+        "-compression_level",
+        "0",
+    ]);
+    sw_cmd.arg(&sw_path);
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        sw_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let sw_ok = match sw_cmd.status().await {
+        Ok(s) => s.success() && sw_path.exists(),
+        Err(_) => false,
+    };
+    if !sw_ok {
+        let _ = std::fs::remove_file(&sw_path);
+        return false;
+    }
+
+    let mut hw_cmd = tokio::process::Command::new(ffmpeg);
+    hw_cmd.args([
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-hwaccel",
+        "auto",
+        "-ss",
+        "0",
+        "-i",
+        file,
+        "-vframes",
+        "1",
+        "-vf",
+        scale_in,
+        "-c:v",
+        "png",
+        "-compression_level",
+        "0",
+    ]);
+    hw_cmd.arg(&hw_path);
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        hw_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let hw_ok = match hw_cmd.status().await {
+        Ok(s) => s.success() && hw_path.exists(),
+        Err(_) => false,
+    };
+    if !hw_ok {
+        let _ = std::fs::remove_file(&sw_path);
+        let _ = std::fs::remove_file(&hw_path);
+        return false;
+    }
+
+    let mut ssim_cmd = tokio::process::Command::new(ffmpeg);
+    ssim_cmd.args([
+        "-v",
+        "error",
+        "-i",
+        &hw_path.to_string_lossy(),
+        "-i",
+        &sw_path.to_string_lossy(),
+        "-filter_complex",
+        "[0:v][1:v]ssim=stats_file=-",
+        "-f",
+        "null",
+        "-",
+    ]);
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        ssim_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let ssim_res = ssim_cmd.output().await;
+    let _ = std::fs::remove_file(&sw_path);
+    let _ = std::fs::remove_file(&hw_path);
+
+    if let Ok(out) = ssim_res {
+        let s = String::from_utf8_lossy(&out.stdout);
+        if let Some(pos) = s.find("All:") {
+            let rest = &s[pos + 4..];
+            let val_str = rest.split_whitespace().next().unwrap_or("0");
+            let ssim_val = val_str.parse::<f64>().unwrap_or(0.0);
+            return ssim_val > 0.999;
+        }
+    }
+    false
+}
+
 pub async fn run_pipeline<F>(
     cfg: PipelineConfig,
     job: JobRequest,
@@ -111,10 +379,7 @@ where
     let t0 = Instant::now();
     let procs = Arc::new(ActiveProcesses::new());
 
-    let temp_root = match &job.temp_root {
-        Some(r) => PathBuf::from(r),
-        None => std::env::temp_dir(),
-    };
+    let temp_root = resolve_temp_root(job.temp_root.as_deref(), &job.output);
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -172,6 +437,11 @@ where
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         let _ = std::fs::remove_dir_all(&tmp_cleanup);
+        if let Some(parent) = tmp_cleanup.parent() {
+            if parent.file_name().and_then(|n| n.to_str()) == Some(".tween-temp") {
+                let _ = std::fs::remove_dir(parent);
+            }
+        }
     });
 
     match result {
@@ -372,13 +642,14 @@ where
         return Err("The video has fewer than two frames.".into());
     }
 
-    let analyse_elapsed_ms = t_analyse.elapsed().as_millis();
+    let analyse_elapsed_ms = t_analyse.elapsed().as_millis() as u64;
+    let free_disk = crate::setup::free_disk_space(tmp);
     let plan = plan_chunks(
         count,
         r.p,
         r.q,
         job.chunk_frames
-            .unwrap_or_else(|| chunk_size(info.width, info.height, r.p, r.q)),
+            .unwrap_or_else(|| chunk_size_with_disk(info.width, info.height, r.p, r.q, free_disk)),
     );
     let total = plan.total;
 
@@ -388,7 +659,7 @@ where
         .map_err(|e| format!("Failed to create pool dir: {}", e))?;
 
     let max_chunk_files = plan.chunks.iter().map(|c| c.files).max().unwrap_or(100);
-    let max_ahead = max_chunk_files * 2 + 4;
+    let max_ahead = max_chunk_files + 4;
 
     let written = Arc::new(AtomicUsize::new(0));
     let released = Arc::new(AtomicUsize::new(0));
@@ -397,92 +668,28 @@ where
     let extractor_ended = Arc::new(AtomicBool::new(false));
     let extractor_failed = Arc::new(Mutex::new(None::<String>));
 
-    let mut ext_cmd = tokio::process::Command::new(&cfg.ffmpeg);
-    ext_cmd.args(["-v", "error"]);
-    ext_cmd.args(&trim_args);
-    ext_cmd.args([
-        "-i",
+    let mut use_hwaccel = check_hwaccel_support(&cfg.ffmpeg, &info.file, &scale_in, tmp).await;
+    let t_extract = Instant::now();
+    let sync = ExtractorSync {
+        pool: pool.clone(),
+        written: written.clone(),
+        released: released.clone(),
+        max_ahead,
+        notify_waiters: notify_waiters.clone(),
+        notify_capacity: notify_capacity.clone(),
+        cancel: cancel.clone(),
+        ended: extractor_ended.clone(),
+        failed: extractor_failed.clone(),
+    };
+    let mut ext_handle = spawn_streaming_extractor(
+        &cfg.ffmpeg,
         &info.file,
-        "-map",
-        "0:v:0",
-        "-fps_mode",
-        "passthrough",
-        "-an",
-        "-sn",
-        "-vf",
+        &trim_args,
         &scale_in,
-        "-f",
-        "image2pipe",
-        "-c:v",
-        "png",
-        "-compression_level",
-        "2",
-        "-",
-    ]);
-    ext_cmd.stdout(std::process::Stdio::piped());
-    ext_cmd.stderr(std::process::Stdio::piped());
-
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        ext_cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    let mut ext_child = ext_cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start extractor: {}", e))?;
-    let ext_pid = ext_child.id().unwrap_or(0);
-    procs.add(ext_pid).await;
-
-    let mut ext_stdout = ext_child.stdout.take().ok_or("Failed to open extractor stdout")?;
-    let pool_clone = pool.clone();
-    let written_clone = written.clone();
-    let released_clone = released.clone();
-    let notify_waiters_clone = notify_waiters.clone();
-    let notify_capacity_clone = notify_capacity.clone();
-    let cancel_clone = cancel.clone();
-    let ended_clone = extractor_ended.clone();
-
-    let failed_clone = extractor_failed.clone();
-
-    let extractor_task = tokio::spawn(async move {
-        let mut splitter = PngSplitter::new();
-        let mut buf = vec![0u8; 65536];
-
-        loop {
-            if cancel_clone.load(Ordering::SeqCst) {
-                break;
-            }
-            while written_clone.load(Ordering::SeqCst).saturating_sub(released_clone.load(Ordering::SeqCst)) > max_ahead {
-                if cancel_clone.load(Ordering::SeqCst) {
-                    break;
-                }
-                tokio::select! {
-                    _ = notify_capacity_clone.notified() => {},
-                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(50)) => {}
-                }
-            }
-
-            match ext_stdout.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    splitter.push(&buf[..n], |img| {
-                        let idx = written_clone.fetch_add(1, Ordering::SeqCst);
-                        let file_name = format!("{:08}.png", idx + 1);
-                        let _ = std::fs::write(pool_clone.join(file_name), &img);
-                        notify_waiters_clone.notify_waiters();
-                    });
-                }
-                Err(e) => {
-                    let mut lock = failed_clone.lock().await;
-                    *lock = Some(format!("Extractor read error: {}", e));
-                    break;
-                }
-            }
-        }
-        ended_clone.store(true, Ordering::SeqCst);
-        notify_waiters_clone.notify_waiters();
-    });
+        use_hwaccel,
+        sync.clone(),
+    )?;
+    procs.add(ext_handle.pid).await;
 
     // ---- 5. encoder (started now, fed as chunks finish)
     let is_mp4_mov = {
@@ -572,6 +779,7 @@ where
 
     ff_args.push(job.output.clone());
 
+    let t_encode = Instant::now();
     let mut enc_cmd = tokio::process::Command::new(&cfg.ffmpeg);
     enc_cmd.args(&ff_args);
     enc_cmd.stdin(std::process::Stdio::piped());
@@ -596,12 +804,6 @@ where
         ("gpu", Some(g)) => g.id.to_string(),
         _ => "-1".to_string(),
     };
-    let light = cfg.mode != "gpu"
-        || cfg
-            .gpu
-            .as_ref()
-            .map(|g| g.integrated)
-            .unwrap_or(true);
 
     let t_interpolate = Instant::now();
     let mut gpu = gpu_arg;
@@ -647,6 +849,7 @@ where
                 if let Err(e) = enc_stdin.write_all(&data).await {
                     return Err(format!("Encoder write error: {}", e));
                 }
+                let _ = tokio::fs::remove_file(&file_path).await;
                 count_encoded += 1;
             }
             let _ = tokio::fs::remove_dir_all(&item.cin).await;
@@ -658,6 +861,8 @@ where
 
     let mut rife_total_ms = 0u128;
     let mut cut_fix_total_ms = 0u128;
+    let peak_temp_bytes = Arc::new(AtomicU64::new(0));
+    peak_temp_bytes.fetch_max(dir_size(tmp), Ordering::Relaxed);
 
     for ci in 0..plan.chunks.len() {
         let ch = &plan.chunks[ci];
@@ -672,12 +877,57 @@ where
                 return Err("cancelled".into());
             }
             if let Some(err) = extractor_failed.lock().await.clone() {
+                if use_hwaccel {
+                    use_hwaccel = false;
+                    procs.remove(ext_handle.pid).await;
+                    kill_tree(ext_handle.pid);
+                    ext_handle.task.abort();
+                    *extractor_failed.lock().await = None;
+                    extractor_ended.store(false, Ordering::SeqCst);
+                    written.store(0, Ordering::SeqCst);
+                    released.store(0, Ordering::SeqCst);
+                    let _ = std::fs::remove_dir_all(&pool);
+                    let _ = std::fs::create_dir_all(&pool);
+                    ext_handle = spawn_streaming_extractor(
+                        &cfg.ffmpeg,
+                        &info.file,
+                        &trim_args,
+                        &scale_in,
+                        false,
+                        sync.clone(),
+                    )?;
+                    procs.add(ext_handle.pid).await;
+                    continue;
+                }
                 return Err(err);
             }
             tokio::select! {
                 _ = notify_waiters.notified() => {},
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(50)) => {}
             }
+        }
+
+        if written.load(Ordering::SeqCst) <= target_idx && extractor_ended.load(Ordering::SeqCst) && use_hwaccel {
+            use_hwaccel = false;
+            procs.remove(ext_handle.pid).await;
+            kill_tree(ext_handle.pid);
+            ext_handle.task.abort();
+            *extractor_failed.lock().await = None;
+            extractor_ended.store(false, Ordering::SeqCst);
+            written.store(0, Ordering::SeqCst);
+            released.store(0, Ordering::SeqCst);
+            let _ = std::fs::remove_dir_all(&pool);
+            let _ = std::fs::create_dir_all(&pool);
+            ext_handle = spawn_streaming_extractor(
+                &cfg.ffmpeg,
+                &info.file,
+                &trim_args,
+                &scale_in,
+                false,
+                sync.clone(),
+            )?;
+            procs.add(ext_handle.pid).await;
+            continue;
         }
 
         let cin = tmp.join(format!("c{}-in", ci));
@@ -707,6 +957,8 @@ where
         let run_rife = |g: String, jobs: String| {
             let cin_clone = cin.clone();
             let cout_clone = cout.clone();
+            let tmp_ticker = tmp.to_path_buf();
+            let peak_disk_clone = peak_temp_bytes.clone();
             let rife_dir_path = PathBuf::from(&cfg.rife_dir);
             let model_path = rife_dir_path.join(model_id);
             let rife_cmd_cfg = cfg.rife_cmd.clone();
@@ -783,6 +1035,8 @@ where
                         if stop_ticker_clone.load(Ordering::SeqCst) {
                             break;
                         }
+                        let cur_d = dir_size(&tmp_ticker);
+                        peak_disk_clone.fetch_max(cur_d, Ordering::Relaxed);
                         let d = std::fs::read_dir(&cout_ticker)
                             .map(|entries| entries.count())
                             .unwrap_or(0);
@@ -837,8 +1091,15 @@ where
         };
 
         let t_rife_chunk = Instant::now();
-        let initial_jobs = if light { "1:1:1" } else { "2:2:2" };
-        let rife_res = run_rife(gpu.clone(), initial_jobs.to_string()).await;
+        let cpu_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let is_gpu = cfg.mode == "gpu";
+        let is_integrated = cfg
+            .gpu
+            .as_ref()
+            .map(|g| g.integrated)
+            .unwrap_or(true);
+        let initial_jobs = rife_threads(cpu_threads, is_gpu, is_integrated);
+        let rife_res = run_rife(gpu.clone(), initial_jobs).await;
 
         if let Err(e1) = rife_res {
             if cancel.load(Ordering::SeqCst) {
@@ -941,6 +1202,7 @@ where
         .await
         .map_err(|e| format!("Encoder wait error: {}", e))?;
     procs.remove(enc_pid).await;
+    let encode_elapsed_ms = t_encode.elapsed().as_millis() as u64;
 
     if !enc_status.success() {
         let mut err_str = String::new();
@@ -950,16 +1212,18 @@ where
         return Err(format!("Encoding failed (exit {}).\n{}", enc_status, err_str));
     }
 
-    let _ = extractor_task.await;
-    let ext_status = ext_child
+    let _ = ext_handle.task.await;
+    let ext_status = ext_handle
+        .child
         .wait()
         .await
         .map_err(|e| format!("Extractor wait error: {}", e))?;
-    procs.remove(ext_pid).await;
+    procs.remove(ext_handle.pid).await;
+    let extract_elapsed_ms = t_extract.elapsed().as_millis() as u64;
 
     if !ext_status.success() && !extractor_ended.load(Ordering::SeqCst) {
         let mut err_str = String::new();
-        if let Some(mut stderr) = ext_child.stderr.take() {
+        if let Some(mut stderr) = ext_handle.child.stderr.take() {
             let _ = stderr.read_to_string(&mut err_str).await;
         }
         return Err(format!("Frame extraction failed (exit {}).\n{}", ext_status, err_str));
@@ -969,6 +1233,8 @@ where
         .map(|m| m.len())
         .unwrap_or(0);
     let seconds = t0.elapsed().as_secs_f64();
+
+    peak_temp_bytes.fetch_max(dir_size(tmp), Ordering::Relaxed);
 
     #[cfg(debug_assertions)]
     println!(
@@ -989,6 +1255,13 @@ where
         out_size: Some(out_size),
         frames: Some(encoded),
         cuts: Some(cuts.len()),
+        peak_temp_bytes: Some(peak_temp_bytes.load(Ordering::Relaxed)),
+        stage_times: Some(StageTimes {
+            analyse_ms: analyse_elapsed_ms,
+            extract_ms: extract_elapsed_ms,
+            rife_ms: rife_total_ms as u64,
+            encode_ms: encode_elapsed_ms,
+        }),
     };
 
     emit(JobProgressEvent {
