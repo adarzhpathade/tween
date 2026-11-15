@@ -15,6 +15,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 pub fn kill_tree(pid: u32) {
+    if pid == 0 {
+        return;
+    }
     #[cfg(target_os = "windows")]
     {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -22,7 +25,7 @@ pub fn kill_tree(pid: u32) {
         cmd.args(["/pid", &pid.to_string(), "/T", "/F"]);
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
-        let _ = cmd.spawn();
+        let _ = cmd.status();
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -50,11 +53,15 @@ impl ActiveProcesses {
     }
 
     pub async fn add(&self, pid: u32) {
-        self.pids.lock().await.insert(pid);
+        if pid != 0 {
+            self.pids.lock().await.insert(pid);
+        }
     }
 
     pub async fn remove(&self, pid: u32) {
-        self.pids.lock().await.remove(&pid);
+        if pid != 0 {
+            self.pids.lock().await.remove(&pid);
+        }
     }
 
     pub async fn kill_all(&self) {
@@ -64,8 +71,30 @@ impl ActiveProcesses {
             lock.clear();
             pids
         };
-        for pid in pids {
-            kill_tree(pid);
+        #[cfg(target_os = "windows")]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let mut handles = Vec::new();
+            for pid in pids {
+                if pid == 0 {
+                    continue;
+                }
+                let mut cmd = tokio::process::Command::new("taskkill");
+                cmd.args(["/pid", &pid.to_string(), "/T", "/F"]);
+                cmd.creation_flags(CREATE_NO_WINDOW);
+                if let Ok(child) = cmd.spawn() {
+                    handles.push(child);
+                }
+            }
+            for mut h in handles {
+                let _ = h.wait().await;
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            for pid in pids {
+                kill_tree(pid);
+            }
         }
     }
 }
@@ -101,6 +130,15 @@ where
     }
 
     let emit = Arc::new(emit);
+    let cancel_watchdog = cancel.clone();
+    let procs_watchdog = procs.clone();
+    let watchdog = tokio::spawn(async move {
+        while !cancel_watchdog.load(Ordering::SeqCst) {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
+        procs_watchdog.kill_all().await;
+    });
+
     let result = run_internal(
         &cfg,
         &job,
@@ -112,11 +150,17 @@ where
     )
     .await;
 
+    watchdog.abort();
     procs.kill_all().await;
 
     if cancel.load(Ordering::SeqCst) {
         let _ = std::fs::remove_file(&job.output);
-        let _ = std::fs::remove_dir_all(&tmp);
+        for _ in 0..50 {
+            if std::fs::remove_dir_all(&tmp).is_ok() || !tmp.exists() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
         return JobFinished {
             ok: false,
             cancelled: Some(true),
@@ -562,6 +606,17 @@ where
     let t_interpolate = Instant::now();
     let mut gpu = gpu_arg;
 
+    emit(JobProgressEvent {
+        stage: "interpolate".into(),
+        pct: Some(0.0),
+        done: Some(0),
+        total: Some(total as u64),
+        speed: None,
+        eta: None,
+        preview: None,
+        note: None,
+    });
+
     struct FeedItem {
         cout: PathBuf,
         cin: PathBuf,
@@ -619,7 +674,10 @@ where
             if let Some(err) = extractor_failed.lock().await.clone() {
                 return Err(err);
             }
-            notify_waiters.notified().await;
+            tokio::select! {
+                _ = notify_waiters.notified() => {},
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(50)) => {}
+            }
         }
 
         let cin = tmp.join(format!("c{}-in", ci));

@@ -53,13 +53,38 @@ pub fn ratio(info: &ProbeInfo, target: &Target) -> RatioResult {
     let fr = match &target.value {
         TargetValue::String(s) if s.contains('/') => parse_rate(s),
         TargetValue::String(s) => {
-            let val = s.parse::<f64>().unwrap_or(0.0);
-            let expr = format!("{}/1000", (val * 1000.0).round() as u64);
-            parse_rate(&expr)
+            let s_trim = s.trim();
+            if s_trim == "59.94" || s_trim == "59.940" {
+                (60000, 1001, 60000.0 / 1001.0)
+            } else if s_trim == "29.97" || s_trim == "29.970" {
+                (30000, 1001, 30000.0 / 1001.0)
+            } else if s_trim == "23.976" || s_trim == "23.98" {
+                (24000, 1001, 24000.0 / 1001.0)
+            } else {
+                let val = s.parse::<f64>().unwrap_or(0.0);
+                if (val - 59.94).abs() < 0.005 {
+                    (60000, 1001, 60000.0 / 1001.0)
+                } else if (val - 29.97).abs() < 0.005 {
+                    (30000, 1001, 30000.0 / 1001.0)
+                } else if (val - 23.976).abs() < 0.005 {
+                    (24000, 1001, 24000.0 / 1001.0)
+                } else {
+                    let expr = format!("{}/1000", (val * 1000.0).round() as u64);
+                    parse_rate(&expr)
+                }
+            }
         }
         TargetValue::Number(val) => {
-            let expr = format!("{}/1000", (val * 1000.0).round() as u64);
-            parse_rate(&expr)
+            if (*val - 59.94).abs() < 0.005 {
+                (60000, 1001, 60000.0 / 1001.0)
+            } else if (*val - 29.97).abs() < 0.005 {
+                (30000, 1001, 30000.0 / 1001.0)
+            } else if (*val - 23.976).abs() < 0.005 {
+                (24000, 1001, 24000.0 / 1001.0)
+            } else {
+                let expr = format!("{}/1000", (*val * 1000.0).round() as u64);
+                parse_rate(&expr)
+            }
         }
     };
 

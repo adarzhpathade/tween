@@ -10,6 +10,9 @@ pub mod splitter;
 pub mod stats;
 pub mod types;
 
+#[cfg(test)]
+mod e2e_tests;
+
 pub use clean::{
     clean_temp, clear_temp, default_folders, storage_info, DefaultFolders, StorageInfo,
 };
