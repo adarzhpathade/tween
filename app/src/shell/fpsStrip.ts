@@ -93,22 +93,43 @@ export function computeFpsRows(
   return [...multRows, ...fixedRows, customRow];
 }
 
+export interface CustomFpsHint {
+  text: string;
+  isError: boolean;
+  v?: number;
+}
+
+export function getCustomFpsHint(
+  str: string,
+  sourceFps: number | null
+): CustomFpsHint {
+  const s = str.trim();
+  const minF = computeMinCustomFps(sourceFps);
+  if (s === "") {
+    return { text: "NUMBER", isError: true };
+  }
+  const v = Number(s);
+  if (isNaN(v)) {
+    return { text: "NUMBER", isError: true };
+  }
+  if (v < minF) {
+    return { text: `MIN ${minF}`, isError: true, v };
+  }
+  if (v > MAX_FPS) {
+    return { text: `MAX ${MAX_FPS}`, isError: true, v };
+  }
+  return { text: `${minF}\u2013${MAX_FPS} FPS`, isError: false, v };
+}
+
 export function checkCustomVal(
   str: string,
   sourceFps: number | null
 ): { v?: number; err?: string } {
-  const s = str.trim();
-  if (s === "") return { err: "Enter a number" };
-  const v = Number(s);
-  if (isNaN(v)) return { err: "Enter a number" };
-  const minF = computeMinCustomFps(sourceFps);
-  if (v < minF) {
-    return { v, err: `Must be above ${sourceFps ? formatFps(sourceFps) : 0}` };
+  const hint = getCustomFpsHint(str, sourceFps);
+  if (hint.isError) {
+    return hint.v !== undefined ? { v: hint.v, err: hint.text } : { err: hint.text };
   }
-  if (v > MAX_FPS) {
-    return { v, err: `Must be ${MAX_FPS} or less` };
-  }
-  return { v };
+  return { v: hint.v };
 }
 
 export function clampCustomVal(
