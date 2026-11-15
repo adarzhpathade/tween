@@ -44,7 +44,7 @@ export interface ProbeInfo {
 
 export interface Target {
   mode: "multiplier" | "fps" | string;
-  value: number;
+  value: number | string;
 }
 
 export interface Trim {

@@ -169,7 +169,15 @@ export const ScreenRouter: React.FC = () => {
   const [videoLoaded, setVideoLoaded] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      if (params.get("mock") === "1") return true;
+      if (
+        params.get("mock") === "1" ||
+        params.has("src") ||
+        params.has("custom") ||
+        params.has("customval") ||
+        params.get("state") === "ready"
+      ) {
+        return true;
+      }
     }
     return false;
   });
