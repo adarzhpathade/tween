@@ -138,11 +138,28 @@ pub async fn clear_temp(state: tauri::State<'_, PipelineState>) -> Result<(), St
 mod tests {
     use super::*;
 
+    fn test_temp_dir(name: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tween-test-clean-{}-{}-{}-{}",
+            name,
+            std::process::id(),
+            count,
+            nanos
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
     #[test]
     fn test_storage_helpers() {
-        let test_root = std::env::temp_dir().join(format!("tween-test-storage-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&test_root);
-        std::fs::create_dir_all(&test_root).unwrap();
+        let test_root = test_temp_dir("storage");
 
         let tween_dir = test_root.join("tween-job-123");
         std::fs::create_dir_all(&tween_dir).unwrap();

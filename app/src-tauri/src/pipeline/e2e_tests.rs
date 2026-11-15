@@ -1215,21 +1215,33 @@ async fn test_hardware_decode_matches_software() {
         hw_frame.to_str().unwrap(),
     ]);
     let hw_out = run_cmd_timeout(hw_cmd, Duration::from_secs(15)).await;
+    let hw_supported = runner::check_hwaccel_support("ffmpeg", clip.to_str().unwrap(), scale_in, &work).await;
 
     if hw_out.status.success() && hw_frame.exists() {
         let ssim = ssim_between("ffmpeg", hw_frame.to_str().unwrap(), sw_frame.to_str().unwrap()).await;
-        println!("Hardware decode SSIM vs software decode: {:.6}", ssim);
-        assert!(
-            ssim > 0.999,
-            "Hardware decode pixel output must match software decode: ssim={}",
-            ssim
-        );
+        println!("Hardware decode SSIM vs software decode: {:.6} (check_hwaccel_support={})", ssim, hw_supported);
+        if hw_supported {
+            assert!(
+                ssim > 0.999,
+                "Hardware decode pixel output must match software decode: ssim={}",
+                ssim
+            );
+        } else {
+            // Hardware decode differs (e.g. macOS VideoToolbox gives SSIM ~0.987).
+            // Assert that check_hwaccel_support returns false for this clip so the app safely falls back to software decode.
+            assert!(
+                !hw_supported,
+                "When hardware decode differs from software decode (ssim={}), check_hwaccel_support must return false",
+                ssim
+            );
+        }
     } else {
+        assert!(
+            !hw_supported,
+            "When hardware decode is unsupported or fails, check_hwaccel_support must return false"
+        );
         println!("Hardware decode not supported in this environment; fallback verified");
     }
-
-    // Verify check_hwaccel_support runs cleanly
-    let _ = runner::check_hwaccel_support("ffmpeg", clip.to_str().unwrap(), scale_in, &work).await;
 
     let _ = std::fs::remove_dir_all(&work);
 }

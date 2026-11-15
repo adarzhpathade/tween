@@ -1818,6 +1818,25 @@ pub fn open_url(url: String) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn test_temp_dir(name: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tween-test-setup-{}-{}-{}-{}",
+            name,
+            std::process::id(),
+            count,
+            nanos
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
     #[test]
     fn test_is_allowed_driver_url() {
         assert!(is_allowed_driver_url("https://www.nvidia.com/Download/index.aspx"));
@@ -1874,8 +1893,7 @@ mod tests {
 
     #[test]
     fn test_config_save_load() {
-        let tmp = std::env::temp_dir().join(format!("tween-test-cfg-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = test_temp_dir("cfg");
 
         let cfg = SetupConfig {
             platform: "win32".to_string(),
@@ -2169,8 +2187,7 @@ mod tests {
         let zip_bytes = make_test_zip(false);
         let (url, shutdown) = spawn_range_server(zip_bytes, false).await;
 
-        let tmp = std::env::temp_dir().join(format!("tween-test-extract-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = test_temp_dir("zip-extract");
 
         let want = ["bin/ffmpeg.exe", "LICENSE", "rife-v4.26/"];
         let mut progress_calls = 0;
@@ -2224,8 +2241,7 @@ mod tests {
         let zip_bytes = make_test_zip(false);
         let (url, shutdown) = spawn_range_server(zip_bytes, true).await;
 
-        let tmp = std::env::temp_dir().join(format!("tween-test-retry-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = test_temp_dir("retry");
 
         let want = ["LICENSE"];
         crate::remotezip::fetch_from_zip(&url, &want, &tmp, |_g, _t| {})
@@ -2241,8 +2257,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "runs setup installer against real download URLs"]
     async fn test_real_setup_downloads() {
-        let tmp = std::env::temp_dir().join(format!("tween-test-real-download-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp = test_temp_dir("real-download");
         let p = paths(&tmp);
 
         // 1. Test real FFmpeg download & extraction

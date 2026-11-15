@@ -472,6 +472,25 @@ mod tests {
         .hdr);
     }
 
+    fn test_temp_dir(name: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tween-test-pipeline-{}-{}-{}-{}",
+            name,
+            std::process::id(),
+            count,
+            nanos
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
     #[tokio::test]
     async fn test_e2e_fake_rife() {
         let has_ffmpeg = std::process::Command::new("ffmpeg")
@@ -503,9 +522,7 @@ mod tests {
             return;
         }
 
-        let work = std::env::temp_dir().join(format!("tween-rust-e2e-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&work);
-        std::fs::create_dir_all(&work).unwrap();
+        let work = test_temp_dir("fake-rife");
 
         let clip = work.join("clip.mp4");
         let ff_gen = std::process::Command::new("ffmpeg")

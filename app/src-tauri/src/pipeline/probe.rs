@@ -454,6 +454,25 @@ pub async fn extract_frame(
 mod tests {
     use super::*;
 
+    fn test_temp_dir(name: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "tween-test-probe-{}-{}-{}-{}",
+            name,
+            std::process::id(),
+            count,
+            nanos
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
     #[tokio::test]
     async fn test_extract_frame_bouncing_ball() {
         let has_ffmpeg = std::process::Command::new("ffmpeg")
@@ -469,9 +488,7 @@ mod tests {
             return;
         }
 
-        let work = std::env::temp_dir().join(format!("tween-test-extract-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&work);
-        std::fs::create_dir_all(&work).unwrap();
+        let work = test_temp_dir("bouncing-ball");
 
         let clip = work.join("Bouncing Ball.mp4");
         let status = std::process::Command::new("ffmpeg")
@@ -518,9 +535,7 @@ mod tests {
             return;
         }
 
-        let work = std::env::temp_dir().join(format!("tween-test-thumbs-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&work);
-        std::fs::create_dir_all(&work).unwrap();
+        let work = test_temp_dir("thumbs");
 
         let clip = work.join("test_clip.mp4");
         let status = std::process::Command::new("ffmpeg")
