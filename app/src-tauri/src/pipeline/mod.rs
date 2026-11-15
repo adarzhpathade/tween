@@ -10,7 +10,9 @@ pub mod splitter;
 pub mod stats;
 pub mod types;
 
-pub use clean::{clean_temp, clear_temp, storage_info, StorageInfo};
+pub use clean::{
+    clean_temp, clear_temp, default_folders, storage_info, DefaultFolders, StorageInfo,
+};
 pub use encoders::{get_encoder, EncoderDef, ENCODERS};
 pub use models::{rife_exe, ModelDef, MODELS};
 pub use plan::{chunk_size, cut_fixes, gcd, parse_rate, plan_chunks, ratio, rife_map};

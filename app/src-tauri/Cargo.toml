@@ -26,6 +26,7 @@ base64 = "0.22"
 # default features would add xdg-portal, which clashes with tauri-plugin-dialog's gtk3 on Linux
 rfd = { version = "0.17", default-features = false }
 sysinfo = "0.40"
+dirs = "7"
 
 [profile.release]
 codegen-units = 1

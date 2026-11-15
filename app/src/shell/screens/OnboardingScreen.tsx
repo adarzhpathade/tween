@@ -4,6 +4,11 @@ import { listen } from "@tauri-apps/api/event";
 import { prefersReducedMotion, springAnim } from "../../motion";
 import type { Screen } from "../types";
 import type { SetupConfig, SetupProgressEvent, SetupResult } from "../setupTypes";
+import {
+  loadSettingsDefaults,
+  saveSettingsDefaults,
+  fetchDefaultFolders,
+} from "../settingsTypes";
 
 export interface OnboardingScreenProps {
   onNavigate?: (screen: Screen) => void;
@@ -67,9 +72,27 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
     }
     return initialAllow;
   });
-  const [outputFolder, setOutputFolder] = useState<string>("D:\\Videos\\Flowmotion");
-  const [scratchFolder, setScratchFolder] = useState<string>("D:\\Flowmotion\\scratch");
+  const [outputFolder, setOutputFolder] = useState<string>(() => {
+    const defs = loadSettingsDefaults();
+    return defs.outputFolder || "—";
+  });
+  const [scratchFolder, setScratchFolder] = useState<string>("—");
   const [shellMenu, setShellMenu] = useState<boolean>(true);
+
+  // Load real default folders
+  useEffect(() => {
+    fetchDefaultFolders().then((f) => {
+      setOutputFolder((prev) => {
+        if (prev && prev !== "—") return prev;
+        const existing = loadSettingsDefaults();
+        if (!existing.outputFolder) {
+          saveSettingsDefaults({ ...existing, outputFolder: f.output });
+        }
+        return f.output;
+      });
+      setScratchFolder(f.temp);
+    });
+  }, []);
 
   // Animation and DOM refs
   const welcomeRef = useRef<HTMLDivElement | null>(null);
@@ -593,6 +616,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
     if (step < 2) {
       setStep(step + 1);
     } else {
+      if (outputFolder && outputFolder !== "—") {
+        const existing = loadSettingsDefaults();
+        saveSettingsDefaults({ ...existing, outputFolder });
+      }
       handleFinish();
     }
   };
@@ -609,6 +636,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   };
 
   const handleFinish = () => {
+    if (outputFolder && outputFolder !== "—") {
+      const existing = loadSettingsDefaults();
+      saveSettingsDefaults({ ...existing, outputFolder });
+    }
     const isRM = prefersReducedMotion();
     if (isRM || !welcomeRef.current) {
       onNavigate?.("ready");
@@ -625,26 +656,57 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
     }, 380);
   };
 
-  const handleBrowseOutput = () => {
-    const list = [
-      "D:\\Videos\\Flowmotion",
-      "D:\\Video Creation\\Exports",
-      "C:\\Users\\You\\Downloads",
-    ];
-    const currIdx = list.indexOf(outputFolder);
-    const nextIdx = (currIdx + 1) % list.length;
-    setOutputFolder(list[nextIdx]);
+  const handleBrowseOutput = async () => {
+    if (isTauri()) {
+      try {
+        const picked = await invoke<string | null>("pick_output_folder", {
+          defaultPath: outputFolder && outputFolder !== "—" ? outputFolder : undefined,
+        });
+        if (picked) {
+          setOutputFolder(picked);
+          const existing = loadSettingsDefaults();
+          saveSettingsDefaults({ ...existing, outputFolder: picked });
+        }
+      } catch (err) {
+        console.warn("pick_output_folder error:", err);
+      }
+    } else {
+      const list = [
+        "C:\\Users\\You\\Videos\\Tween",
+        "C:\\Users\\You\\Videos\\Exports",
+        "C:\\Users\\You\\Downloads",
+      ];
+      const currIdx = list.indexOf(outputFolder);
+      const nextIdx = (currIdx + 1) % list.length;
+      const nextFolder = list[nextIdx];
+      setOutputFolder(nextFolder);
+      const existing = loadSettingsDefaults();
+      saveSettingsDefaults({ ...existing, outputFolder: nextFolder });
+    }
   };
 
-  const handleBrowseScratch = () => {
-    const list = [
-      "D:\\Flowmotion\\scratch",
-      "C:\\Users\\You\\AppData\\Local\\Temp\\tween",
-      "E:\\Scratch",
-    ];
-    const currIdx = list.indexOf(scratchFolder);
-    const nextIdx = (currIdx + 1) % list.length;
-    setScratchFolder(list[nextIdx]);
+  const handleBrowseScratch = async () => {
+    if (isTauri()) {
+      try {
+        const picked = await invoke<string | null>("pick_output_folder", {
+          defaultPath: scratchFolder && scratchFolder !== "—" ? scratchFolder : undefined,
+        });
+        if (picked) {
+          setScratchFolder(picked);
+        }
+      } catch (err) {
+        console.warn("pick_output_folder error:", err);
+      }
+    } else {
+      const list = [
+        "C:\\Users\\You\\AppData\\Local\\Temp\\tween",
+        "C:\\Scratch",
+        "C:\\Users\\You\\AppData\\Local\\Temp",
+      ];
+      const currIdx = list.indexOf(scratchFolder);
+      const nextIdx = (currIdx + 1) % list.length;
+      setScratchFolder(list[nextIdx]);
+    }
   };
 
   // Continue or Finish stays disabled until setup_run returns ok
@@ -700,7 +762,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
                   <span className="ln"><span ref={ln2Ref}>every frame.</span></span>
                 </h1>
                 <p className="sub">
-                  Flowmotion adds the frames your footage never had, so 24 or 30 fps video plays as smooth as 60.
+                  Tween adds the frames your footage never had, so 24 or 30 fps video plays as smooth as 60.
                 </p>
               </div>
 
@@ -867,7 +929,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
               <div className="hd">
                 <h1 className="h1s">Set up access.</h1>
                 <p className="sub">
-                  Choose what Flowmotion may read and where it writes. You can change this later.
+                  Choose what Tween may read and where it writes. You can change this later.
                 </p>
               </div>
 
@@ -925,7 +987,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
                   <div className="ac">
                     <div>
                       <b>Right-click menu</b>
-                      <span>“Interpolate with Flowmotion”</span>
+                      <span>“Interpolate with Tween”</span>
                     </div>
                     <div
                       className={`sw ${shellMenu ? "" : "off"}`}

@@ -519,6 +519,13 @@ where
         ff_args.push("-movflags".to_string());
         ff_args.push("+faststart".to_string());
     }
+
+    if let Some(parent) = std::path::Path::new(&job.output).parent() {
+        if !parent.as_os_str().is_empty() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
     ff_args.push(job.output.clone());
 
     let mut enc_cmd = tokio::process::Command::new(&cfg.ffmpeg);

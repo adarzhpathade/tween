@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { Screen, ProbeInfo, JobRequest, JobFinished } from "../types";
+import { loadSettingsDefaults } from "../settingsTypes";
 
 export interface DoneScreenProps {
   probeInfo?: ProbeInfo | null;
@@ -194,11 +195,13 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
     ? "beach_sunset_48fps.mp4"
     : "—";
 
-  const savedFolderPath = resFile
-    ? resFile.replace(/[\\/][^\\/]+$/, "")
-    : isMock
-    ? "D:\\Videos\\Flowmotion"
-    : "—";
+  const savedFolderPath =
+    (resFile
+      ? resFile.replace(/[\\/][^\\/]+$/, "")
+      : jobRequest?.output
+      ? jobRequest.output.replace(/[\\/][^\\/]+$/, "")
+      : loadSettingsDefaults().outputFolder ||
+        (isMock ? "C:\\Users\\You\\Videos\\Tween" : "—")) || "—";
 
   const sizeText =
     jobFinished?.outSize != null

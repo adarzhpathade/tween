@@ -1,7 +1,28 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+
 export interface StorageInfo {
   tempDir: string;
   freeBytes: number;
   inUseBytes: number;
+}
+
+export interface DefaultFolders {
+  output: string;
+  temp: string;
+}
+
+export async function fetchDefaultFolders(customTemp?: string): Promise<DefaultFolders> {
+  if (typeof window !== "undefined" && isTauri()) {
+    try {
+      return await invoke<DefaultFolders>("default_folders", { customTemp });
+    } catch (err) {
+      console.warn("default_folders error:", err);
+    }
+  }
+  return {
+    output: "C:\\Users\\You\\Videos\\Tween",
+    temp: "C:\\Users\\You\\AppData\\Local\\Temp\\tween",
+  };
 }
 
 export interface SettingsDefaults {
