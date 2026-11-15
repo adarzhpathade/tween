@@ -11,6 +11,7 @@ import {
   stepFpsAnimation,
   computeMinCustomFps,
   computeFpsRows,
+  getCustomFpsHint,
   checkCustomVal,
   clampCustomVal,
 } from "../fpsStrip";
@@ -145,12 +146,16 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     if (initialProbe) return initialProbe;
     if (typeof window !== "undefined") {
       const searchParams = previewParams();
+      const stateParam = searchParams.get("state") || searchParams.get("screen");
+      if (stateParam === "open" || searchParams.get("file") === "none") {
+        return null;
+      }
       const isMockOrPreview =
         (import.meta.env.DEV && searchParams.get("mock") === "1") ||
         searchParams.has("src") ||
         searchParams.has("custom") ||
         searchParams.has("customval") ||
-        (import.meta.env.DEV && searchParams.get("state") === "ready");
+        (import.meta.env.DEV && stateParam === "ready");
 
       if (isMockOrPreview) {
         const srcParam = parseFloat(searchParams.get("src") || "24");
@@ -389,21 +394,10 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     }
     return "";
   });
-  const [inputErr, setInputErr] = useState<string | null>(() => {
-    if (typeof window !== "undefined") {
-      const p = previewParams();
-      if (p.get("custom") === "edit") {
-        const cv = p.get("customval");
-        if (cv) {
-          const srcParam = parseFloat(p.get("src") || "24");
-          const sFps = isNaN(srcParam) || srcParam <= 0 ? 24 : srcParam;
-          const res = checkCustomVal(cv, sFps);
-          return res.err || null;
-        }
-      }
-    }
-    return null;
-  });
+  const customHint = useMemo(
+    () => getCustomFpsHint(customInputStr, sourceFps),
+    [customInputStr, sourceFps]
+  );
 
   const frailRef = useRef<HTMLElement | null>(null);
   const fsegRef = useRef<HTMLDivElement | null>(null);
@@ -519,9 +513,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       }
 
       setCustomInputStr(String(start));
-      const c = checkVal(String(start));
-      setInputErr(c.err || null);
-
       if (instant) {
         setDisplayFps(start);
       }
@@ -529,16 +520,16 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       requestAnimationFrame(() => {
         if (inputRef.current) {
           inputRef.current.focus();
+          inputRef.current.select();
         }
       });
     },
-    [isEditingCustom, selectedChoice, sourceFps, customFps, checkVal]
+    [isEditingCustom, selectedChoice, sourceFps, customFps]
   );
 
   const cancelEdit = useCallback(() => {
     if (!isEditingCustom) return;
     setIsEditingCustom(false);
-    setInputErr(null);
     setSelectedChoice(prevChoice);
   }, [isEditingCustom, prevChoice]);
 
@@ -551,7 +542,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     setCustomFps(clamped);
     setCustomInputStr(String(clamped));
     setIsEditingCustom(false);
-    setInputErr(null);
     setSelectedChoice("Custom");
     setDisplayFps(clamped);
 
@@ -583,8 +573,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       const base = c.v === undefined ? minF : c.v;
       const next = Math.min(MAXF, Math.max(minF, base + delta));
       setCustomInputStr(String(next));
-      const res = checkVal(String(next));
-      setInputErr(res.err || null);
+      setDisplayFps(next);
     },
     [checkVal, customInputStr, sourceFps]
   );
@@ -593,10 +582,12 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const clean = e.target.value.replace(/\D/g, "").slice(0, 3);
       setCustomInputStr(clean);
-      const res = checkVal(clean);
-      setInputErr(res.err || null);
+      const parsed = Number(clean);
+      if (clean !== "" && !isNaN(parsed)) {
+        setDisplayFps(parsed);
+      }
     },
-    [checkVal]
+    []
   );
 
   const handleInputKeyDown = useCallback(
@@ -637,8 +628,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         if (moved) {
           const next = Math.min(MAXF, Math.max(minF, v0 + Math.round(dy / 4)));
           setCustomInputStr(String(next));
-          const res = checkVal(String(next));
-          setInputErr(res.err || null);
+          setDisplayFps(next);
         }
       };
 
@@ -648,6 +638,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         el.removeEventListener("pointercancel", onUp);
         if (!moved) {
           el.focus();
+          el.select();
         }
       };
 
@@ -690,7 +681,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
       setCustomFps(v);
       setCustomInputStr(String(v));
       setIsEditingCustom(false);
-      setInputErr(null);
       setSelectedChoice("Custom");
       setDisplayFps(v);
       localStorage.setItem("tween_last_fps_choice", "Custom");
@@ -1566,10 +1556,6 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
                 }
               }}
             >
-              <i className="cm a" />
-              <i className="cm b" />
-              <i className="cm c" />
-              <i className="cm d" />
               <div className="dzr">
                 <b className="dzt" id="dzt">
                   Drop a video
@@ -1719,7 +1705,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         <span className="lbl">Frame rate</span>
         <div
           ref={rvRef}
-          className={`rv ${isEditingCustom ? "edit" : ""} ${inputErr ? "bad" : ""}`}
+          className={`rv ${isEditingCustom ? "edit" : ""} ${isEditingCustom && customHint.isError ? "bad" : ""}`}
         >
           <div className="fr0">
             <span id="fpsFrom">
@@ -1746,35 +1732,8 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
             style={{ fontSize: `${counterFontSize}px` }}
           />
           <small>fps</small>
-          <div className="stp" id="fpsStp">
-            <button
-              type="button"
-              className="up"
-              data-d="1"
-              aria-label="Increase"
-              onPointerDown={(e) => e.preventDefault()}
-              onClick={(e) => {
-                stepCustom(e.shiftKey ? 10 : 1);
-                inputRef.current?.focus();
-              }}
-            />
-            <button
-              type="button"
-              className="dn"
-              data-d="-1"
-              aria-label="Decrease"
-              onPointerDown={(e) => e.preventDefault()}
-              onClick={(e) => {
-                stepCustom(e.shiftKey ? -10 : -1);
-                inputRef.current?.focus();
-              }}
-            />
-          </div>
-          <div className={`fhint ${inputErr ? "bad" : ""}`} id="fpsHint">
-            <span className="fhint-l1">Enter apply · Esc cancel</span>
-            <span className="fhint-l2">
-              {inputErr || `${minCustomFps}–${MAXF}`}
-            </span>
+          <div className={`fhint ${customHint.isError ? "bad" : ""}`} id="fpsHint">
+            {customHint.text}
           </div>
         </div>
 

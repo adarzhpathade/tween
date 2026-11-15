@@ -6,6 +6,7 @@ import {
   stepFpsAnimation,
   computeMinCustomFps,
   computeFpsRows,
+  getCustomFpsHint,
   checkCustomVal,
   clampCustomVal,
 } from '../app/src/shell/fpsStrip.ts';
@@ -104,16 +105,34 @@ test('computeFpsRows with applied custom value: Custom reads <val> fps', () => {
   assert.strictEqual(rows[5].sublabel, '90 fps');
 });
 
-test('checkCustomVal: handles empty, invalid, and range bounds', () => {
-  assert.deepStrictEqual(checkCustomVal('', 24), { err: 'Enter a number' });
-  assert.deepStrictEqual(checkCustomVal('abc', 24), { err: 'Enter a number' });
-  assert.deepStrictEqual(checkCustomVal('24', 24), { v: 24, err: 'Must be above 24' });
-  assert.deepStrictEqual(checkCustomVal('10', 24), { v: 10, err: 'Must be above 24' });
-  assert.deepStrictEqual(checkCustomVal('60', 60), { v: 60, err: 'Must be above 60' });
-  assert.deepStrictEqual(checkCustomVal('250', 24), { v: 250, err: 'Must be 240 or less' });
+test('checkCustomVal and getCustomFpsHint: hint text rule handles valid, empty, and bounds', () => {
+  assert.deepStrictEqual(checkCustomVal('', 24), { err: 'NUMBER' });
+  assert.deepStrictEqual(checkCustomVal('abc', 24), { err: 'NUMBER' });
+  assert.deepStrictEqual(checkCustomVal('24', 24), { v: 24, err: 'MIN 25' });
+  assert.deepStrictEqual(checkCustomVal('10', 24), { v: 10, err: 'MIN 25' });
+  assert.deepStrictEqual(checkCustomVal('60', 60), { v: 60, err: 'MIN 61' });
+  assert.deepStrictEqual(checkCustomVal('250', 24), { v: 250, err: 'MAX 240' });
   assert.deepStrictEqual(checkCustomVal('90', 24), { v: 90 });
   assert.deepStrictEqual(checkCustomVal('25', 24), { v: 25 });
   assert.deepStrictEqual(checkCustomVal('240', 24), { v: 240 });
+
+  // One short line in mono label style replacing FPS:
+  // - Valid: <min>–240 FPS (muted)
+  // - Below min: MIN <min> (in var(--warn))
+  // - Above 240: MAX 240 (in var(--warn))
+  // - Empty/NaN: NUMBER (in var(--warn))
+  assert.deepStrictEqual(getCustomFpsHint('90', 60), { text: '61–240 FPS', isError: false, v: 90 });
+  assert.deepStrictEqual(getCustomFpsHint('61', 60), { text: '61–240 FPS', isError: false, v: 61 });
+  assert.deepStrictEqual(getCustomFpsHint('240', 60), { text: '61–240 FPS', isError: false, v: 240 });
+  assert.deepStrictEqual(getCustomFpsHint('50', 60), { text: 'MIN 61', isError: true, v: 50 });
+  assert.deepStrictEqual(getCustomFpsHint('300', 60), { text: 'MAX 240', isError: true, v: 300 });
+  assert.deepStrictEqual(getCustomFpsHint('', 60), { text: 'NUMBER', isError: true });
+  assert.deepStrictEqual(getCustomFpsHint('abc', 60), { text: 'NUMBER', isError: true });
+
+  // With source 24 (min 25)
+  assert.deepStrictEqual(getCustomFpsHint('90', 24), { text: '25–240 FPS', isError: false, v: 90 });
+  assert.deepStrictEqual(getCustomFpsHint('20', 24), { text: 'MIN 25', isError: true, v: 20 });
+  assert.deepStrictEqual(getCustomFpsHint('250', 24), { text: 'MAX 240', isError: true, v: 250 });
 });
 
 test('clampCustomVal: corrects to nearest valid range [minCustomFps, 240]', () => {
