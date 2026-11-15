@@ -18,6 +18,14 @@ import {
 export type { ColourInfo, ProbeInfo, FpsRow };
 export { formatFps };
 
+// Mock/preview URL parameters (?mock, ?src, ?custom, ?customval, ?choice, ?state) only work in
+// DEV builds. A release build always sees no parameters.
+function previewParams(): URLSearchParams {
+  return import.meta.env.DEV && typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search)
+    : new URLSearchParams();
+}
+
 const THUMBNAIL_CACHE = new Map<string, string[]>();
 
 export interface GpuDevice {
@@ -124,11 +132,11 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const isMock = Boolean(
     import.meta.env.DEV &&
       typeof window !== "undefined" &&
-      (new URLSearchParams(window.location.search).get("mock") === "1" ||
-        new URLSearchParams(window.location.search).has("src") ||
-        new URLSearchParams(window.location.search).has("custom") ||
-        new URLSearchParams(window.location.search).has("customval") ||
-        new URLSearchParams(window.location.search).get("state") === "ready")
+      (previewParams().get("mock") === "1" ||
+        previewParams().has("src") ||
+        previewParams().has("custom") ||
+        previewParams().has("customval") ||
+        previewParams().get("state") === "ready")
   );
 
   // The app starts strictly in the empty state (probeInfo = null).
@@ -136,7 +144,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const [probeInfo, setProbeInfo] = useState<ProbeInfo | null>(() => {
     if (initialProbe) return initialProbe;
     if (typeof window !== "undefined") {
-      const searchParams = new URLSearchParams(window.location.search);
+      const searchParams = previewParams();
       const isMockOrPreview =
         (import.meta.env.DEV && searchParams.get("mock") === "1") ||
         searchParams.has("src") ||
@@ -225,7 +233,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
   const [view, setView] = useState<"orig" | "res">(() => {
     if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
+      const p = previewParams();
       const v = p.get("view");
       if (v === "orig" || v === "res") return v;
     }
@@ -331,7 +339,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
   const [selectedChoice, setSelectedChoice] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
+      const p = previewParams();
       const ch = p.get("choice");
       if (ch) {
         return ch.replace(/([0-9]+)[xX]/g, "$1×");
@@ -346,7 +354,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
   const [customFps, setCustomFps] = useState<number | null>(() => {
     if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
+      const p = previewParams();
       const cv = p.get("customval");
       if (cv) return parseInt(cv, 10);
       if (p.get("custom") === "applied") return 90;
@@ -357,7 +365,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
   const [isEditingCustom, setIsEditingCustom] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
+      const p = previewParams();
       return p.get("custom") === "edit";
     }
     return false;
@@ -365,7 +373,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const [prevChoice, setPrevChoice] = useState<string>("2×");
   const [customInputStr, setCustomInputStr] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
+      const p = previewParams();
       const cv = p.get("customval");
       if (cv) return cv;
       if (p.get("custom") === "edit" || p.get("custom") === "applied") return "90";
@@ -374,7 +382,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   });
   const [inputErr, setInputErr] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
+      const p = previewParams();
       if (p.get("custom") === "edit") {
         const cv = p.get("customval");
         if (cv) {
@@ -418,7 +426,10 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     const activeRow = fpsRows.find((r) => r.key === selectedChoice);
     if (!activeRow) return sourceFps * 2;
     if (activeRow.isCustom) {
-      return customFps !== null ? customFps : (90 > sourceFps ? 90 : minCustomFps);
+      // A saved custom value may be invalid for this source (e.g. 50 saved, now a 60 fps video): clamp it.
+      return customFps !== null
+        ? Math.min(MAXF, Math.max(minCustomFps, customFps))
+        : (90 > sourceFps ? 90 : minCustomFps);
     }
     return activeRow.fps;
   }, [selectedChoice, fpsRows, sourceFps, customFps, minCustomFps]);
@@ -656,7 +667,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   // Mock / preview query parameter support: ?custom=edit|applied&customval=90
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
+    const params = previewParams();
     const cm = params.get("custom");
     const cv = params.get("customval");
     const customValNum = cv ? parseInt(cv, 10) : undefined;
