@@ -678,15 +678,98 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 /* design-review switcher (not part of the app) */review{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;background:#000a;backdrop-filter:blur(8px);border:1px solid #ffffff22;border-radius:99px;overflow:hidden;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
 .review span{padding:8px 14px;color:#777}
 .review button{padding:8px 14px;color:#aaa}.review button.on{background:var(--acc);color:#111}
+
+/* ---------- v7: adaptive frame-rate rows + custom entry in the counter ---------- */
+.frail{position:relative}
+.frail.editing{overflow:visible;z-index:6}
+.fseg.v button.dis{opacity:.3;cursor:not-allowed}
+.fseg.v button.dis:hover{color:var(--mut)}
+.rv{position:relative}
+.rv .fin{display:none;width:1.8em;padding:0 0 3px;margin:6px 0 0;border:0;border-bottom:1px solid var(--acc);border-radius:0;background:transparent;color:var(--text);text-align:center;outline:0;caret-color:var(--acc);cursor:ns-resize;transform:translateX(-8px);touch-action:none;-moz-appearance:textfield;box-sizing:content-box;height:46px;transition:color .2s,border-color .2s}
+.rv.edit .fin{display:block}
+.fin::selection{background:#a9b79a3d;color:inherit}
+.frail.nt,.frail.nt *{transition:none!important}
+.rv.edit .fr1:not(.fin){display:none}
+.rv.bad .fin{color:#c9907a;border-bottom-color:#c9907a}
+.stp{position:absolute;right:5px;top:38px;display:none;flex-direction:column;gap:3px}
+.rv.edit .stp{display:flex}
+.stp button{position:relative;width:15px;height:21px;border:1px solid var(--line2);border-radius:3px;color:var(--mut);transition:color .2s,border-color .2s,background .2s}
+.stp button:hover{color:var(--acc);border-color:var(--acc)}
+.stp button:active{background:#a9b79a22}
+.stp button::before{content:"";position:absolute;left:50%;top:50%;width:4px;height:4px;border:solid currentColor;border-width:1px 0 0 1px;transform:translate(-50%,-30%) rotate(45deg)}
+.stp button.dn::before{transform:translate(-50%,-70%) rotate(225deg)}
+.fhint{position:absolute;right:calc(100% - 1px);top:calc(100% - 1px);z-index:7;display:none;white-space:nowrap;padding:7px 12px 7px 11px;background:var(--bg);border:1px solid var(--line2);border-right:0;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:var(--mut);transition:color .2s,border-color .2s}
+.rv.edit .fhint{display:block}
+.fhint.bad{color:#c9907a;border-color:#c9907a66}
+
+/* ---------- v7: settings button + sheet; onboarding skip ---------- */
+.win{position:relative}
+.welcome[data-step="1"] .skip,.welcome[data-step="2"] .skip{visibility:hidden;pointer-events:none}
+.vsw button{white-space:nowrap}
+.wc span[role=button]{cursor:pointer}
+.wc #setBtn.on{color:var(--acc)}
+.setroot{position:absolute;left:0;right:0;top:36px;bottom:0;z-index:60;overflow:hidden}
+.setroot[hidden]{display:none}
+.setov{position:absolute;inset:0;background:#000a;backdrop-filter:blur(2px)}
+.sheet{position:absolute;top:0;right:0;bottom:0;width:408px;display:flex;flex-direction:column;background:var(--bg);border-left:1px solid var(--line2);box-shadow:-24px 0 60px -20px #000c}
+.sh-head{display:flex;justify-content:space-between;align-items:center;height:36px;padding-left:24px;border-bottom:1px solid var(--line);flex:none}
+.sh-x{width:42px;height:36px;display:grid;place-items:center;color:var(--mut);cursor:pointer}
+.sh-x:hover{background:#ffffff12;color:var(--text)}
+.sh-nav{display:flex;gap:22px;padding:0 24px;border-bottom:1px solid var(--line);flex:none}
+.sh-nav button{position:relative;padding:12px 0 11px;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);transition:color .2s}
+.sh-nav button:hover{color:var(--text)}
+.sh-nav button.on{color:var(--text)}
+.sh-nav button.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--acc)}
+.sh-scroll{flex:1;overflow:auto;scrollbar-width:none;position:relative}
+.sheet .grp{padding:20px 24px 22px}
+.sheet .grp>.lbl em{font-style:normal;color:var(--acc);letter-spacing:.1em}
+.sck{display:grid;gap:1px;background:var(--line);border:1px solid var(--line)}
+.sck .ck{padding:11px 14px;grid-template-columns:20px 1fr}
+.sck .ck b{font-size:12.5px}
+.sck .ck span{font-size:10px}
+.sh-btns{display:flex;gap:8px;margin-top:14px}
+.sh-btns .chipb.ok{border-color:var(--acc);color:var(--acc)}
+.sh-f{margin-bottom:16px}
+.sh-f>span{display:block;font-size:12px;color:var(--mut);margin-bottom:8px}
+.sheet .opt{display:flex;flex-direction:column;gap:6px}
+.sheet .model{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid var(--line);background:transparent;transition:border-color .2s,background .2s}
+.sheet .model:hover{border-color:var(--line2);background:#ffffff05}
+.sheet .model.on{border-color:var(--acc);background:#a9b79a12}
+.sheet .model .mtx{flex:1;min-width:0}
+.sheet .model .mtx b{display:block;font-weight:500;font-size:12.5px;color:var(--text)}
+.sheet .model small{display:block;font-size:11px;color:var(--dim);margin-top:2px}
+.sheet .model em{font-style:normal;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.sheet .model.on em{color:var(--acc)}
+.sheet .model .rd{display:none}
+.sheet .seg button{padding:8px 0}
+.pickb{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;border:1px solid var(--line);transition:border-color .2s,background .2s}
+.pickb:hover{border-color:var(--line2);background:#ffffff05}
+.pickb div{flex:1;min-width:0}
+.pickb b{display:block;font-weight:500;font-size:12.5px}
+.pickb small{display:block;font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px}
+.pickb span{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.sheet .row{padding:9px 0;border-bottom:1px solid var(--line)}
+.sheet .row:last-of-type{border-bottom:0}
+.ab-name{font-family:var(--mono);font-weight:300;font-size:30px;letter-spacing:-.04em;margin:2px 0 10px}
+.lnk{font-family:var(--mono);font-size:11.5px;color:var(--text);border-bottom:1px solid var(--line2);padding-bottom:1px;transition:color .2s,border-color .2s;cursor:pointer}
+.lnk:hover{color:var(--acc);border-color:var(--acc)}
+.notices{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--spring-d) var(--spring)}
+.notices>div{overflow:hidden;min-height:0}
+.notices.open{grid-template-rows:1fr}
+.nl{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);font-size:12px;color:var(--mut)}
+.nl:first-child{margin-top:4px}
+.nl b{font-weight:500;color:var(--text)}
+.nl span{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
 </style>
 </head>
 <body>
 <div class="win" id="app" data-state="empty" data-file="none">
 
   <div class="tb">
-    <div class="brand"><i></i>flowmotion</div>
+    <div class="brand"><i></i>Tween</div>
     <div class="title" id="title">Welcome</div>
     <div class="wc">
+      <span id="setBtn" role="button" tabindex="0" aria-label="Settings" title="Settings"><svg viewBox="0 0 12 12"><path d="M1 3.5h4M9 3.5h2M1 8.5h2M7 8.5h4"/><circle cx="7" cy="3.5" r="1.6"/><circle cx="5" cy="8.5" r="1.6"/></svg></span>
       <span><svg viewBox="0 0 12 12"><path d="M1 6h10"/></svg></span>
       <span><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9"/></svg></span>
       <span><svg viewBox="0 0 12 12"><path d="M1 1l10 10M11 1L1 11"/></svg></span>
@@ -817,15 +900,11 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 
     <aside class="frail nv">
       <span class="lbl">Frame rate</span>
-      <div class="rv"><div class="fr0">24 <i>→</i></div><div class="fr1" id="fpsTo">48</div><small>fps</small></div>
+      <div class="rv"><div class="fr0"><span id="fpsFrom">24</span> <i>→</i></div><div class="fr1" id="fpsTo">48</div><input class="fr1 fin" id="fpsIn" inputmode="numeric" maxlength="3" autocomplete="off" spellcheck="false" aria-label="Custom frame rate"><small>fps</small>
+        <div class="stp" id="fpsStp"><button type="button" class="up" data-d="1" aria-label="Increase"></button><button type="button" class="dn" data-d="-1" aria-label="Decrease"></button></div>
+        <div class="fhint" id="fpsHint"></div></div>
       <div class="fseg v" id="fseg">
         <i class="pill" id="pill"></i>
-        <button class="on" data-f="48"><b>2×</b><span>48 fps</span></button>
-        <button data-f="72"><b>3×</b><span>72 fps</span></button>
-        <button data-f="96"><b>4×</b><span>96 fps</span></button>
-        <button data-f="60"><b>60</b><span>fps</span></button>
-        <button data-f="120"><b>120</b><span>fps</span></button>
-        <button data-f="90"><b>Custom</b><span>90 fps</span></button>
       </div>
       <div class="gainv"><b id="gainT">+24 frames<br>every second</b></div>
     </aside>
@@ -865,6 +944,59 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
   </div>
 
   <div class="sb"><span id="sbState"><i></i>Ready</span><span>RTX 4050 Laptop · Vulkan</span><span class="sp"></span><span>RIFE v4.6</span></div>
+
+  <!-- v7: settings sheet -->
+  <div class="setroot" id="setroot" hidden>
+    <div class="setov" id="setov"></div>
+    <aside class="sheet" id="sheet" role="dialog" aria-label="Settings">
+      <div class="sh-head"><span class="lbl">Settings</span><span class="sh-x" id="setX" role="button" tabindex="0" aria-label="Close settings"><svg viewBox="0 0 12 12"><path d="M1 1l10 10M11 1L1 11"/></svg></span></div>
+      <div class="sh-nav" id="shNav"><button class="on" data-sec="system">System</button><button data-sec="defaults">Defaults</button><button data-sec="storage">Storage</button><button data-sec="about">About</button></div>
+      <div class="sh-scroll" id="shScroll">
+        <section class="grp" data-sec="system">
+          <div class="lbl">System<em id="shChk">All checks passed</em></div>
+          <div class="sck" id="sck">
+            <div class="ck ok"><i class="ic"></i><b>System</b><span>Windows 11 · 8 threads · 16 GB RAM · 214 GB free</span></div>
+            <div class="ck ok"><i class="ic"></i><b>Graphics</b><span>RTX 4050 Laptop · 6 GB · driver 566.36</span></div>
+            <div class="ck ok"><i class="ic"></i><b>FFmpeg</b><span>9.0.2 · bundled</span></div>
+            <div class="ck ok"><i class="ic"></i><b>Engine</b><span>RIFE v4.6 · Balanced, Fast, Animation</span></div>
+            <div class="ck ok"><i class="ic"></i><b>GPU acceleration</b><span>Vulkan 1.3 · RTX 4050 Laptop</span></div>
+            <div class="ck ok"><i class="ic"></i><b>Encoders</b><span>NVENC H.264 / H.265</span></div>
+          </div>
+          <div class="sh-btns"><button class="chipb" id="shRun">Run checks again</button><button class="chipb" id="shCopy">Copy diagnostics</button></div>
+        </section>
+        <section class="grp" data-sec="defaults">
+          <div class="lbl">Defaults</div>
+          <div class="sh-f"><span>Default model</span>
+            <div class="opt" id="shModel">
+              <div class="model on"><i class="rd"></i><div class="mtx"><b>Balanced</b><small>Best quality for most clips</small></div><em>Recommended</em></div>
+              <div class="model"><i class="rd"></i><div class="mtx"><b>Fast</b><small>Quicker, slightly softer motion</small></div><em>v4</em></div>
+              <div class="model"><i class="rd"></i><div class="mtx"><b>Animation</b><small>Tuned for cartoons and anime</small></div><em>2× only</em></div>
+            </div></div>
+          <div class="sh-f"><span>Default quality</span>
+            <div class="seg" id="shQ"><button>CQ 23</button><button class="on">CQ 18</button><button>CQ 14</button></div></div>
+          <div class="sh-f"><span>Default output folder</span>
+            <button class="pickb" type="button"><div><b>Flowmotion</b><small>D:\Videos\Flowmotion</small></div><span>Choose</span></button></div>
+          <div class="row"><span>Keep audio</span><div class="sw" id="shAud"></div></div>
+          <div class="row"><span>Scene-cut fix</span><div class="sw" id="shScn"></div></div>
+        </section>
+        <section class="grp" data-sec="storage">
+          <div class="lbl">Storage</div>
+          <div class="row"><span>Temp folder</span><b>D:\Flowmotion\scratch</b></div>
+          <div class="row"><span>Free space</span><b>214 GB</b></div>
+          <div class="row"><span>In use</span><b id="shUse">1.2 GB</b></div>
+          <div class="sh-btns"><button class="chipb" id="shClr">Clear temporary files</button></div>
+        </section>
+        <section class="grp" data-sec="about">
+          <div class="lbl">About</div>
+          <div class="ab-name">Tween</div>
+          <div class="row"><span>Version</span><b>0.1.0</b></div>
+          <div class="row"><span>Created by adarzh</span><a class="lnk" href="https://adarzh.tech" target="_blank" rel="noopener">adarzh.tech</a></div>
+          <div class="row"><span>Legal</span><button class="lnk" id="shNot" type="button" aria-expanded="false">Third-party notices</button></div>
+          <div class="notices" id="shNotices"><div><div class="nl"><b>RIFE</b><span>MIT</span></div><div class="nl"><b>ncnn</b><span>BSD-3-Clause</span></div><div class="nl"><b>FFmpeg</b><span>GPL · downloaded build</span></div><div class="nl"><b>Geist</b><span>SIL OFL 1.1</span></div></div></div>
+        </section>
+      </div>
+    </aside>
+  </div>
 </div>
 
 <div class="review"><span>Design review</span>
@@ -874,6 +1006,8 @@ svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5;stroke
 
 <script>
 const app=document.getElementById('app');
+/* mock-only: ?src=<fps> sets the source frame rate (default 24) */
+const SRC=Math.min(239,Math.max(1,+((location.search.match(/[?&]src=(\d+)/)||[])[1])||24));
 function setState(s){
   const open=s==='open';if(open)s='ready';
   app.dataset.file=(open||s==='empty')?'none':'loaded';
@@ -881,8 +1015,8 @@ function setState(s){
   document.getElementById('insp').classList.toggle('locked',s==='proc');
   const key=open?'open':s;
   document.querySelectorAll('.review button').forEach(b=>b.classList.toggle('on',b.dataset.s===key));
-  document.getElementById('title').textContent=s==='empty'?'Welcome':open?'Flowmotion':'beach_sunset_24fps.mp4';
-  const fn=document.getElementById('fhName');if(fn)fn.textContent=open?'No video selected':'beach_sunset_24fps.mp4';
+  document.getElementById('title').textContent=s==='empty'?'Welcome':open?'Flowmotion':'beach_sunset_'+SRC+'fps.mp4';
+  const fn=document.getElementById('fhName');if(fn)fn.textContent=open?'No video selected':'beach_sunset_'+SRC+'fps.mp4';
   const sb=document.getElementById('sbState');
   sb.className=s==='proc'?'busy':'';
   sb.innerHTML=''+(open?'Idle':{empty:'Idle',ready:'Ready',proc:'Interpolating…',done:'Finished'}[s]);
@@ -903,6 +1037,7 @@ function springEase(response,ratio){const key=response+'/'+ratio;if(cache[key])r
   pts[pts.length-1]=1;return cache[key]={easing:'linear('+pts.join(',')+')',duration:Math.round((pts.length-1)/60*1000)};}
 const sa=(el,kf,r,z,o={})=>{const e=springEase(r,z);return el.animate(kf,Object.assign({duration:e.duration,easing:e.easing,fill:'both'},o));};
 const sp=springEase(.4,.62);
+window.__spring={sa,springEase};
 document.documentElement.style.setProperty('--spring',sp.easing);
 document.documentElement.style.setProperty('--spring-d',sp.duration+'ms');
 
@@ -968,7 +1103,7 @@ const NEXT=['Get started','Continue','Finish'],META=['Welcome','System check','A
 const PRIV=['Runs on your GPU. Your videos never leave this device.','Checked locally. Nothing is uploaded.','You can change these any time in Settings.'];
 
 function lightSch(){}function lightFlow(){}
-const pips=[...document.querySelectorAll('#pips i')],ckRows=[...document.querySelectorAll('.ck')];
+const pips=[...document.querySelectorAll('#pips i')],ckRows=[...document.querySelectorAll('.cks .ck')];
 let step=0,passed=0,tms=[],dls=[];const acc={read:false};
 let MISSING=/missing=1/.test(location.search)?[2,5]:[];
 const DLINFO={2:['FFmpeg','9.0.2','85 MB'],5:['Interpolation engine','RIFE v4.6','448 MB']};
@@ -1023,7 +1158,8 @@ function goStep(n){
 }
 nextB.addEventListener('click',()=>{if(step<2)goStep(step+1);else finish();});
 backB.addEventListener('click',()=>{if(step>0)goStep(step-1);});
-document.getElementById('skip').addEventListener('click',finish);
+/* Skip never skips setup: it jumps to the system check, which still runs */
+document.getElementById('skip').addEventListener('click',()=>goStep(1));
 function finish(){
   if(RM){setState('open');return;}
   sa(W,[{opacity:1,transform:'none'},{opacity:0,transform:'scale(.985)'}],.45,1);
@@ -1056,7 +1192,7 @@ const _st=(location.search.match(/state=(\w+)/)||[])[1];if(_st)setState(_st);
 
 /* ---------- v7: trim editor ---------- */
 (function(){
-const D=42,FPS=24,lane=document.getElementById('lane'),film=document.getElementById('film');
+const D=42,FPS=SRC,lane=document.getElementById('lane'),film=document.getElementById('film');
 const st={inT:0,outT:D,ph:15.8},$=id=>document.getElementById(id);
 for(let i=0;i<150;i++){const c=document.createElement('i'),u=i/149;
   const h=18+Math.abs(Math.sin(u*23)*.55+Math.sin(u*7.3+1)*.3+Math.sin(u*61)*.15)*62;
@@ -1091,22 +1227,91 @@ addEventListener('keydown',e=>{if(app.dataset.state!=='ready')return;if(e.key===
 render();window.__trimRender=render;
 })();
 
-/* ---------- v7: frame-rate selector ---------- */
+/* ---------- v7: frame-rate selector (rows adapt to the source fps; custom entry lives in the counter) ---------- */
 (function(){
-const seg=document.getElementById('fseg'),pill=document.getElementById('pill'),btns=[...seg.querySelectorAll('button')];
-const to=document.getElementById('fpsTo'),gain=document.getElementById('gainT');
-let cur=48,raf=0;
+const MAXF=240,MINF=SRC+1,Q=location.search;
+const frail=document.querySelector('.frail'),seg=document.getElementById('fseg'),pill=document.getElementById('pill');
+const rv=document.querySelector('.frail .rv'),to=document.getElementById('fpsTo'),inp=document.getElementById('fpsIn'),hint=document.getElementById('fpsHint'),gain=document.getElementById('gainT');
+document.getElementById('fpsFrom').textContent=SRC;
+const og=document.querySelector('[data-v=orig] small');if(og)og.textContent=SRC+' fps';
+/* rows: 2x 3x 4x, then up to two fixed targets above the source (and not duplicating a multiplier), then Custom */
+const rows=[2,3,4].map(m=>({k:m+'×',f:SRC*m,mult:true}));
+const taken=new Set(rows.map(r=>r.f));
+[60,120,144,240].filter(t=>t>SRC&&t<=MAXF&&!taken.has(t)).slice(0,2).forEach(t=>rows.push({k:String(t),f:t}));
+rows.push({k:'Custom',custom:true});
+const btns=rows.map(r=>{const b=document.createElement('button');
+  b.innerHTML='<b>'+r.k+'</b><span>'+(r.mult?r.f+' fps':'fps')+'</span>';
+  if(r.custom)b.dataset.f='';else{b.dataset.f=r.f;if(r.f>MAXF){b.classList.add('dis');b.setAttribute('aria-disabled','true');b.title='Above 240 fps';}}
+  seg.appendChild(b);return b;});
+const cBtn=btns[btns.length-1],cSpan=cBtn.querySelector('span');
+let cur=0,shown=0,raf=0,editing=false,prevBtn=null,customVal=null,hintTimer=0;
+const clamp=v=>Math.min(MAXF,Math.max(MINF,v));
 function placePill(b){const k=seg.classList.contains('v')?0:3;pill.style.width=b.offsetWidth-2*k+'px';pill.style.height=b.offsetHeight-2*k+'px';pill.style.transform='translate('+(b.offsetLeft+k)+'px,'+(b.offsetTop+k)+'px)';}
-function snapPill(){const b=btns.find(x=>x.classList.contains('on'));pill.style.transition='none';placePill(b);void pill.offsetWidth;pill.style.transition='';}
-function tween(from,end){cancelAnimationFrame(raf);const t0=performance.now(),d=520;
-  (function f(now){const p=Math.min(1,(now-t0)/d),e=1-Math.pow(1-p,3);to.textContent=Math.round(from+(end-from)*e);if(p<1)raf=requestAnimationFrame(f);})(t0);}
+function snapPill(){const b=btns.find(x=>x.classList.contains('on'));if(!b)return;pill.style.transition='none';placePill(b);void pill.offsetWidth;pill.style.transition='';}
+function put(v){shown=v;if(editing)inp.value=v;else to.textContent=v;}
+function tween(from,end,d){cancelAnimationFrame(raf);const t0=performance.now();d=d||520;
+  (function f(now){const p=Math.min(1,(now-t0)/d),e=1-Math.pow(1-p,3);put(Math.round(from+(end-from)*e));if(p<1)raf=requestAnimationFrame(f);})(t0);}
+/* the existing spring (CSS vars --spring / --spring-d) for small nudges */
+const springOpts=()=>{const cs=getComputedStyle(document.documentElement);return{duration:parseFloat(cs.getPropertyValue('--spring-d'))||400,easing:cs.getPropertyValue('--spring').trim()||'ease-out'};};
+function nudge(el,kf){try{el.animate(kf,springOpts());}catch(e){}}
+function setGain(f){gain.innerHTML='+'+(f-SRC)+' frames<br>every second';}
 function pick(b,instant){const f=+b.dataset.f;btns.forEach(x=>x.classList.toggle('on',x===b));placePill(b);
-  if(f!==cur){if(instant)to.textContent=f;else tween(cur,f);}
-  cur=f;gain.innerHTML='+'+(f-24)+' frames<br>every second';
-  window.__to=f;document.getElementById('tagTo').textContent=f+' fps';if(window.__trimRender)window.__trimRender();}
-btns.forEach(b=>b.addEventListener('click',()=>pick(b)));
-const init=()=>pick(btns[0],true);
-init();addEventListener('resize',snapPill);
+  if(f!==cur){if(instant)put(f);else tween(shown,f);}
+  cur=f;setGain(f);window.__to=f;
+  document.getElementById('tagTo').textContent=f+' fps';
+  const rf=document.querySelector('.rfps');if(rf){rf.children[0].textContent=SRC;rf.querySelector('.to').textContent=f;rf.parentNode.querySelector('.rrow b').innerHTML=Math.round(42*SRC).toLocaleString()+' &rarr; '+Math.round(42*f).toLocaleString();}
+  const fn=document.querySelector('.rfn');if(fn)fn.textContent='beach_sunset_'+f+'fps.mp4';
+  if(window.__trimRender)window.__trimRender();}
+/* ---- custom entry ---- */
+function check(){const s=inp.value.trim();if(s==='')return{err:'Enter a number'};const v=+s;
+  if(v<MINF)return{v,err:'Must be above '+SRC};
+  if(v>MAXF)return{v,err:'Must be '+MAXF+' or less'};return{v};}
+function paintHint(){clearTimeout(hintTimer);const c=check();hint.classList.toggle('bad',!!c.err);rv.classList.toggle('bad',!!c.err);
+  if(!c.err)setGain(c.v);hint.textContent=c.err||'Enter to apply · Esc to cancel · '+MINF+'–'+MAXF;}
+function enterEdit(v,instant){if(editing)return;editing=true;prevBtn=btns.find(x=>x.classList.contains('on'));
+  if(v===undefined&&customVal!==null)v=customVal;
+  rv.classList.add('edit');frail.classList.add('editing');
+  btns.forEach(x=>x.classList.toggle('on',x===cBtn));placePill(cBtn);
+  const start=v!==undefined?v:(90>SRC?90:clamp(Math.round(SRC*1.5)));
+  if(instant)put(start);else{inp.value=shown;tween(shown,start);}
+  paintHint();inp.focus();inp.select();}
+function leave(){editing=false;rv.classList.remove('edit','bad');frail.classList.remove('editing');clearTimeout(hintTimer);}
+function cancel(){if(!editing)return;leave();btns.forEach(x=>x.classList.toggle('on',x===prevBtn));placePill(prevBtn);
+  setGain(cur);tween(shown,cur);}
+function commit(){if(!editing)return;const c=check();
+  /* user decision: an invalid value is corrected to the nearest valid one and applied at once */
+  const v=c.err?clamp(c.v===undefined?(customVal||MINF):c.v):c.v;customVal=v;cBtn.dataset.f=v;cSpan.textContent=v+' fps';
+  leave();inp.blur();cancelAnimationFrame(raf);put(v);
+  nudge(to,[{transform:'scale(.93)'},{transform:'none'}]);
+  pick(cBtn,true);}
+function setVal(v){inp.value=v;shown=v;paintHint();}
+function step(d){const c=check();const base=c.v===undefined?MINF:c.v;cancelAnimationFrame(raf);setVal(clamp(base+d));}
+inp.addEventListener('input',()=>{inp.value=inp.value.replace(/\D/g,'').slice(0,3);cancelAnimationFrame(raf);paintHint();});
+inp.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();commit();}
+  else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();cancel();}
+  else if(e.key==='ArrowUp'||e.key==='ArrowDown'){e.preventDefault();step((e.key==='ArrowUp'?1:-1)*(e.shiftKey?10:1));}});
+/* drag vertically on the number to scrub */
+inp.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();inp.setPointerCapture(e.pointerId);
+  const y0=e.clientY,c=check(),v0=c.v===undefined?MINF:c.v;let moved=false;cancelAnimationFrame(raf);
+  const mv=ev=>{const dy=y0-ev.clientY;if(Math.abs(dy)>3)moved=true;if(moved)setVal(clamp(v0+Math.round(dy/4)));};
+  const up=()=>{inp.removeEventListener('pointermove',mv);inp.removeEventListener('pointerup',up);inp.removeEventListener('pointercancel',up);if(!moved){inp.focus();inp.select();}};
+  inp.addEventListener('pointermove',mv);inp.addEventListener('pointerup',up);inp.addEventListener('pointercancel',up);});
+document.querySelectorAll('#fpsStp button').forEach(b=>{
+  b.addEventListener('pointerdown',e=>e.preventDefault());
+  b.addEventListener('click',e=>{step(+b.dataset.d*(e.shiftKey?10:1));inp.focus();});});
+/* click outside cancels, like Esc */
+document.addEventListener('pointerdown',e=>{if(editing&&!rv.contains(e.target)&&!cBtn.contains(e.target))cancel();},true);
+btns.forEach(b=>b.addEventListener('click',()=>{
+  if(b.classList.contains('dis'))return;
+  if(b===cBtn){if(!editing)enterEdit();return;}
+  pick(b);}));
+const first=btns.find(b=>!b.classList.contains('dis')&&b!==cBtn)||cBtn;
+if(first===cBtn){enterEdit(undefined,true);}else pick(first,true);
+/* mock-only previews: ?custom=edit|applied&customval=90 */
+const cm=(Q.match(/custom=(\w+)/)||[])[1],cv=(Q.match(/customval=(\d+)/)||[])[1];
+if(cm==='edit'||cm==='applied'){frail.classList.add('nt');setTimeout(()=>frail.classList.remove('nt'),800);enterEdit(cv?+cv:undefined,true);if(cm==='applied')commit();}
+addEventListener('resize',snapPill);
 new MutationObserver(snapPill).observe(document.getElementById('app'),{attributes:true,attributeFilter:['data-state','data-file']});
 document.fonts&&document.fonts.ready.then(snapPill);
 })();
@@ -1132,7 +1337,7 @@ function stop(){clearInterval(iv);}
 function start(){stop();fr=1058;paint();iv=setInterval(()=>{fr=Math.min(TOT,fr+38/4);paint();if(fr>=TOT){stop();setTimeout(()=>{if(app.dataset.state==='proc')setState('done');},900);}},250);}
 function sync(){const s=app.dataset.state;
   $('fhLbl').textContent=s==='proc'?'02 \u00b7 Processing':s==='done'?'03 \u00b7 Finished':'01 \u00b7 Source';
-  $('fhMeta').textContent=s==='done'?'Saved to D:\\Videos\\Flowmotion':s==='proc'?'Interpolating 24 \u2192 48 fps \u00b7 Balanced \u00b7 H.264 NVENC':'1920\u00d71080 \u00b7 24 fps \u00b7 0:42 \u00b7 H.264 \u00b7 AAC \u00b7 1,008 frames';
+  $('fhMeta').textContent=s==='done'?'Saved to D:\\Videos\\Flowmotion':s==='proc'?'Interpolating '+SRC+' \u2192 '+(window.__to||48)+' fps \u00b7 Balanced \u00b7 H.264 NVENC':'1920\u00d71080 \u00b7 '+SRC+' fps \u00b7 0:42 \u00b7 H.264 \u00b7 AAC \u00b7 '+Math.round(42*SRC).toLocaleString()+' frames';
   if(s==='proc')start();else stop();}
 new MutationObserver(sync).observe(app,{attributes:true,attributeFilter:['data-state']});
 sync();
@@ -1155,6 +1360,65 @@ cv.dataset.view='res';
 new MutationObserver(snap).observe(app,{attributes:true,attributeFilter:['data-state','data-file']});
 document.fonts&&document.fonts.ready.then(snap);addEventListener('resize',snap);snap();
 const tg=document.getElementById('tagTo');new MutationObserver(snap).observe(tg,{childList:true,characterData:true,subtree:true});
+})();
+
+/* ---------- v7: settings sheet ---------- */
+(function(){
+const $=id=>document.getElementById(id),root=$('setroot'),sheet=$('sheet'),ov=$('setov'),btn=$('setBtn'),scr=$('shScroll'),nav=[...$('shNav').children];
+const Q=location.search,RMs=matchMedia('(prefers-reduced-motion: reduce)').matches||/step=\d/.test(Q);
+let open=false,tms=[],cpT=0,closing=0;
+const SP=()=>window.__spring;
+function goSec(n,instant){const el=sheet.querySelector('.grp[data-sec="'+n+'"]');if(!el)return;
+  scr.scrollTo({top:Math.max(0,el.offsetTop-1),behavior:instant||RMs?'auto':'smooth'});mark(n);}
+function mark(n){nav.forEach(b=>b.classList.toggle('on',b.dataset.sec===n));}
+function curSec(){let c='system';sheet.querySelectorAll('.grp').forEach(g=>{if(g.offsetTop-scr.scrollTop<=40)c=g.dataset.sec;});
+  if(scr.scrollTop+scr.clientHeight>=scr.scrollHeight-4)c='about';return c;}
+nav.forEach(b=>b.addEventListener('click',()=>goSec(b.dataset.sec)));
+scr.addEventListener('scroll',()=>mark(curSec()));
+function show(instant){if(open)return;open=true;closing++;root.hidden=false;btn.classList.add('on');
+  if(instant||RMs||!SP())return;
+  ov.animate([{opacity:0},{opacity:1}],{duration:260,easing:'ease-out'});
+  SP().sa(sheet,[{transform:'translateX(100%)'},{transform:'translateX(0)'}],.5,1);}
+function hide(){if(!open)return;open=false;btn.classList.remove('on');const mine=++closing;
+  if(RMs||!SP()){root.hidden=true;return;}
+  ov.animate([{opacity:1},{opacity:0}],{duration:200,easing:'ease-in',fill:'forwards'});
+  const a=SP().sa(sheet,[{transform:'translateX(0)'},{transform:'translateX(100%)'}],.4,1);
+  setTimeout(()=>{if(mine===closing){root.hidden=true;[ov,sheet].forEach(e=>e.getAnimations().forEach(x=>x.cancel()));}},Math.min(420,a.effect.getTiming().duration));}
+btn.addEventListener('click',()=>open?hide():show());
+btn.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();btn.click();}});
+$('setX').addEventListener('click',hide);
+$('setX').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();hide();}});
+ov.addEventListener('pointerdown',hide);
+addEventListener('keydown',e=>{if(open&&e.key==='Escape'){e.preventDefault();e.stopPropagation();hide();}},true);
+/* run checks again: replays the onboarding check animation inside the panel */
+const rows=[...document.querySelectorAll('#sck .ck')];
+function runChecks(){tms.forEach(clearTimeout);tms=[];let done=0;$('shChk').textContent='Checking';
+  rows.forEach(r=>r.className='ck');
+  rows.forEach((r,i)=>{
+    const fin=()=>{r.className='ck ok';if(++done===rows.length)$('shChk').textContent='All checks passed';};
+    if(RMs){fin();return;}
+    tms.push(setTimeout(()=>r.className='ck run',200+i*420));
+    tms.push(setTimeout(fin,200+i*420+420));});}
+$('shRun').addEventListener('click',runChecks);
+$('shCopy').addEventListener('click',()=>{const b=$('shCopy');
+  const txt='Tween 0.1.0\nWindows 11 \u00b7 8 threads \u00b7 16 GB RAM \u00b7 214 GB free\nRTX 4050 Laptop \u00b7 6 GB \u00b7 driver 566.36\nFFmpeg 9.0.2 (bundled)\nRIFE v4.6 \u00b7 Balanced, Fast, Animation\nVulkan 1.3 \u00b7 GPU mode\nNVENC H.264 / H.265';
+  try{navigator.clipboard&&navigator.clipboard.writeText(txt).catch(()=>{});}catch(e){}
+  b.textContent='Copied';b.classList.add('ok');clearTimeout(cpT);cpT=setTimeout(()=>{b.textContent='Copy diagnostics';b.classList.remove('ok');},1600);});
+/* defaults */
+const models=[...document.querySelectorAll('#shModel .model')];
+models.forEach(m=>m.addEventListener('click',()=>models.forEach(x=>x.classList.toggle('on',x===m))));
+const qs=[...document.querySelectorAll('#shQ button')];
+qs.forEach(b=>b.addEventListener('click',()=>qs.forEach(x=>x.classList.toggle('on',x===b))));
+$('shAud').addEventListener('click',e=>e.currentTarget.classList.toggle('off'));
+$('shScn').addEventListener('click',e=>e.currentTarget.classList.toggle('off'));
+/* storage */
+$('shClr').addEventListener('click',()=>{const b=$('shClr');$('shUse').textContent='0 B';b.textContent='Cleared';b.classList.add('ok');b.disabled=true;});
+/* about */
+$('shNot').addEventListener('click',()=>{const o=$('shNotices').classList.toggle('open');$('shNot').setAttribute('aria-expanded',o);});
+/* mock-only previews: ?settings=open&section=about&notices=open */
+if(/settings=open/.test(Q)){show(true);const sec=(Q.match(/section=(\w+)/)||[])[1];
+  if(/notices=open/.test(Q)){$('shNotices').classList.add('open');}
+  if(sec)setTimeout(()=>goSec(sec,true),0);}
 })();
 </script>
 </body>
