@@ -74,7 +74,7 @@ for (;;) {
     if (!p || p.st !== v.st || (v.st === 'running' && (p.steps !== v.steps) && flag('--follow'))) {
       if (p || flag('--once') || flag('--follow')) line(id, v);
     }
-    if (['review', 'failed', 'died'].includes(v.st) && (!p || p.st !== v.st || !Object.keys(prev).length)) attention.push(id);
+    if (['review', 'failed', 'died', 'sonnet'].includes(v.st) && (!p || p.st !== v.st || !Object.keys(prev).length)) attention.push(id);
   }
   const vals = Object.values(snap);
   const running = vals.filter((v) => v.st === 'running').length, ready = vals.filter((v) => v.st === 'ready').length;

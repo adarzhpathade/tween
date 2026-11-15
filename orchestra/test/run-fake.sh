@@ -12,7 +12,8 @@ cat > orchestra/tasks.json <<'JSON'
 { "baseBranch": "main", "maxParallel": 2, "timeout": "2m", "stallAfter": "1m", "tasks": [
   { "id": "A", "title": "first", "brief": "briefs/a.md", "deps": [], "checks": [["node", "-e", "require('fs').accessSync('work-A.txt')"]] },
   { "id": "B", "title": "second", "brief": "briefs/a.md", "deps": [], "checks": [["node", "-e", "process.exit(require('fs').readFileSync('work-B.txt','utf8').includes('fixed')?0:1)"]] },
-  { "id": "C", "title": "after A and B", "brief": "briefs/a.md", "deps": ["A", "B"], "checks": [] } ] }
+  { "id": "C", "title": "after A and B", "brief": "briefs/a.md", "deps": ["A", "B"], "checks": [] },
+  { "id": "D", "title": "worker can never pass", "brief": "briefs/a.md", "deps": [], "checks": [["node", "-e", "require('fs').accessSync('sonnet-fix.txt')"]] } ] }
 JSON
 echo "do the thing" > orchestra/briefs/a.md
 printf '.worktrees/\norchestra/runs/\norchestra/STATUS.md\n.tween-task/\n' > .gitignore
@@ -39,4 +40,21 @@ step "late agy ERROR after a complete reply goes to review"
 $O reset C >/dev/null; FAKE_AGY_MODE=lateerror $O dispatch --auto-approve
 node orchestra/watcher.mjs --interval 1s --max-wait 60s || true
 $O status; $O review C | head -4
+step "three attempts, then Sonnet takes over"
+waitD() { for _ in $(seq 120); do $O status | grep -q '^D  running' || return 0; sleep 0.5; done; }
+waitD
+for i in 1 2 3; do
+  st=$($O status | grep '^D')
+  echo "$st"
+  case "$st" in *sonnet*) break ;; esac
+  $O reject D --feedback "attempt $i failed"
+  $O dispatch --auto-approve --only D; waitD
+done
+$O status | grep '^D'
+$O dispatch --auto-approve --only D
+$O takeover D
+( cd .worktrees/D && echo fixed > sonnet-fix.txt && git add -A && git commit -qm "D: fix by orchestrator" )
+$O submit D
+$O review D | sed -n 1,4p
+$O accept D
 step "main log"; git log --oneline --graph | head -12; ls

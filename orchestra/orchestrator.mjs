@@ -10,6 +10,11 @@
 //   node orchestra/orchestrator.mjs accept T03             merge task/T03 into main, remove worktree
 //   node orchestra/orchestrator.mjs reject T03 --feedback "what to fix"   send it back (same conversation)
 //   node orchestra/orchestrator.mjs kill T03 | reset T03 | log T03 [--n 40]
+//   node orchestra/orchestrator.mjs takeover T03           Sonnet takes a task after the worker used its attempts
+//   node orchestra/orchestrator.mjs submit T03             Sonnet's work: commit, run checks, move to review
+//
+// Each worker gets maxAttempts (default 3) dispatches per task. After the last one fails or is
+// rejected, the task's status becomes "sonnet": the orchestrator (Claude Sonnet) does it itself.
 //
 // Per-task state lives in orchestra/runs/<id>/state.json (one writer per file, so no races).
 
@@ -87,9 +92,13 @@ function killTree(pid) {
   else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } }
 }
 
+const MAX_ATTEMPTS = TASKS.maxAttempts || 3;
+const usedUp = (s) => s.owner !== 'sonnet' && (s.attempts || 0) >= MAX_ATTEMPTS;
+
 function effectiveStatus(t) {
   const s = readState(t.id);
-  if (s.status === 'running' && !alive(s.workerPid)) return { ...s, status: 'failed', reason: 'worker process died' };
+  if (s.status === 'running' && !alive(s.workerPid)) return { ...s, status: usedUp(s) ? 'sonnet' : 'failed', reason: 'worker process died' };
+  if ((s.status === 'failed' || (s.status === 'ready' && s.feedback)) && usedUp(s)) return { ...s, status: 'sonnet' };
   if (s.status === 'pending' || s.status === 'ready' || !s.status) {
     const depsDone = (t.deps || []).every((d) => readState(d).status === 'done');
     return { ...s, status: s.feedback ? 'ready' : depsDone ? 'ready' : 'blocked' };
@@ -219,17 +228,7 @@ async function worker(id) {
     }
     const commits = Number(tryGit(['rev-list', '--count', `${BASE}..${branch}`]) || 0);
 
-    // acceptance checks
-    const checks = { passed: true, results: [] };
-    let clog = '';
-    for (const c of t.checks || []) {
-      const r = sh(c[0], c.slice(1), wt, { shell: WIN, timeout: 30 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 });
-      const ok = r.status === 0;
-      checks.passed &&= ok;
-      checks.results.push({ cmd: c.join(' '), ok, code: r.status });
-      clog += `$ ${c.join(' ')}\n${(r.stdout || '').slice(-6000)}${(r.stderr || '').slice(-6000)}\n=> exit ${r.status}\n\n`;
-    }
-    fs.writeFileSync(path.join(rd, `checks-${attempt}.log`), clog);
+    const checks = runChecks(t, wt, attempt);
 
     const agyErr = (result?.error?.message || result?.error || errTail.trim().split('\n').pop() || '').toString().slice(0, 200);
     // agy can return ERROR after the worker already gave its full reply (a trailing API call failed).
@@ -241,7 +240,7 @@ async function worker(id) {
       : !commits ? (denials ? 'no changes: edits were permission-denied (dispatch with --auto-approve)' : 'worker made no changes')
         : !checks.passed ? 'acceptance checks failed' : null;
     writeState(id, {
-      status: reason ? 'failed' : 'review', reason, finishedAt: now(), exitCode: code, agyStatus: result?.status || null,
+      status: reason ? (attempt >= MAX_ATTEMPTS ? 'sonnet' : 'failed') : 'review', reason, finishedAt: now(), exitCode: code, agyStatus: result?.status || null,
       agyWarning: lateError ? `agy reported ERROR after the complete reply: ${agyErr}` : null,
       conversationId: conv, checks, commits, summary: (result?.response || '').slice(0, 4000), usage: result?.usage || null,
       feedback: reason ? s.feedback : null, workerPid: null, agyPid: null,
@@ -257,6 +256,7 @@ function review(id) {
   const n = s.attempts || 0;
   console.log(`# ${id} ${t.title} — ${s.status}${s.reason ? ' (' + s.reason + ')' : ''}, attempt ${n}, ${s.commits || 0} commit(s)\n`);
   if (s.agyWarning) console.log(`Note: ${s.agyWarning}\n`);
+  if (s.owner === 'sonnet') console.log(`Author: Sonnet (the worker used all ${MAX_ATTEMPTS} attempts). Review it as strictly as a worker's.\n`);
   console.log(tryGit(['diff', '--stat', `${BASE}...task/${id}`]) || '(no diff)');
   console.log('\n## Checks'); for (const r of s.checks?.results || []) console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.cmd}`);
   console.log(`  full log: ${path.relative(ROOT, path.join(runDir(id), `checks-${n}.log`))}`);
@@ -286,8 +286,57 @@ function reject(id) {
   const fb = opt('--feedback'); if (!fb) die('reject needs --feedback "..."');
   const s = readState(id);
   if (s.status === 'running') die(`${id} is running; kill it first.`);
+  if (s.owner === 'sonnet') { writeState(id, { status: 'sonnet', feedback: fb, reason: null }); console.log(`${id} is Sonnet's task; fix it in ${wtDir(id)} and run submit.`); return; }
+  if (usedUp(s)) {
+    writeState(id, { status: 'sonnet', feedback: fb, reason: `worker used all ${MAX_ATTEMPTS} attempts` });
+    console.log(`${id}: the worker has used all ${MAX_ATTEMPTS} attempts. Handed to Sonnet: run takeover ${id}.`);
+    return;
+  }
   writeState(id, { status: 'ready', feedback: fb, reason: null });
-  console.log(`${id} sent back. Next dispatch continues conversation ${s.conversationId || '(new)'}.`);
+  console.log(`${id} sent back (attempt ${(s.attempts || 0) + 1} of ${MAX_ATTEMPTS} next). Next dispatch continues conversation ${s.conversationId || '(new)'}.`);
+}
+
+function takeover(id) {
+  const t = taskById(id), s = effectiveStatus(t);
+  if (s.status !== 'sonnet' && !flag('--force')) die(`${id} is ${s.status}; takeover is for tasks whose worker used all ${MAX_ATTEMPTS} attempts.`);
+  const wt = wtDir(id), branch = `task/${id}`;
+  if (!fs.existsSync(wt)) {
+    fs.mkdirSync(WT, { recursive: true });
+    if (tryGit(['rev-parse', '--verify', branch])) git(['worktree', 'add', wt, branch]);
+    else git(['worktree', 'add', '-b', branch, wt, BASE]);
+  }
+  buildPrompt(t, s);
+  writeState(id, { status: 'sonnet', owner: 'sonnet', takenOverAt: now() });
+  console.log(`Sonnet owns ${id} now.\n  worktree: ${wt}  (branch ${branch}, keeps the worker's commits)\n  brief:    ${path.join(wt, '.tween-task', 'TASK.md')}`);
+  if (s.feedback) console.log(`  last review feedback:\n${s.feedback.split('\n').map((l) => '    ' + l).join('\n')}`);
+  console.log(`Work and commit inside the worktree, then: node orchestra/orchestrator.mjs submit ${id}`);
+}
+
+function runChecks(t, wt, label) {
+  const checks = { passed: true, results: [] };
+  let clog = '';
+  for (const c of t.checks || []) {
+    const r = sh(c[0], c.slice(1), wt, { shell: WIN, timeout: 30 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 });
+    const ok = r.status === 0;
+    checks.passed &&= ok;
+    checks.results.push({ cmd: c.join(' '), ok, code: r.status });
+    clog += `$ ${c.join(' ')}\n${(r.stdout || '').slice(-6000)}${(r.stderr || '').slice(-6000)}\n=> exit ${r.status}\n\n`;
+  }
+  fs.writeFileSync(path.join(runDir(t.id), `checks-${label}.log`), clog);
+  return checks;
+}
+
+function submit(id) {
+  const t = taskById(id), s = readState(id);
+  if (s.owner !== 'sonnet') die(`${id} is not Sonnet's task (run takeover ${id} first).`);
+  const wt = wtDir(id), branch = `task/${id}`;
+  if (tryGit(['status', '--porcelain'], wt)) { git(['add', '-A'], wt); git(['commit', '-m', `${id}: ${t.title} (orchestrator)`], wt); }
+  const commits = Number(tryGit(['rev-list', '--count', `${BASE}..${branch}`]) || 0);
+  const checks = runChecks(t, wt, 'sonnet');
+  const reason = !commits ? 'no changes on the branch' : !checks.passed ? 'acceptance checks failed' : null;
+  writeState(id, { status: reason ? 'sonnet' : 'review', reason, checks, commits, summary: opt('--summary', s.summary), feedback: reason ? s.feedback : null });
+  for (const r of checks.results) console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.cmd}`);
+  console.log(reason ? `${id} stays with Sonnet: ${reason} (log: ${path.relative(ROOT, path.join(runDir(id), 'checks-sonnet.log'))})` : `${id} is in review. Review the diff as strictly as a worker's, then accept or keep fixing.`);
 }
 
 function kill(id) {
@@ -321,6 +370,6 @@ function log(id) {
 
 // ---------- main ----------
 const [cmd, id] = args;
-const cmds = { doctor, status, dispatch, review: () => review(id), accept: () => accept(id), reject: () => reject(id), kill: () => kill(id), reset: () => reset(id), log: () => log(id), _worker: () => worker(id) };
+const cmds = { doctor, status, dispatch, review: () => review(id), accept: () => accept(id), reject: () => reject(id), kill: () => kill(id), reset: () => reset(id), log: () => log(id), takeover: () => takeover(id), submit: () => submit(id), _worker: () => worker(id) };
 if (!cmds[cmd]) { console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 16).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')); process.exit(cmd ? 1 : 0); }
 await cmds[cmd]();

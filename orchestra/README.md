@@ -54,3 +54,5 @@ In headless mode `agy` cannot ask you to approve a file edit or command. Without
 `review` (checks passed) or `failed` → orchestrator `accept` → `done`, or `reject --feedback` → `ready` again.
 
 A merge conflict on `accept` sends the task back automatically with instructions to rebase.
+
+**Three attempts per worker** (`maxAttempts` in `tasks.json`). Every dispatch counts. When the third attempt fails or is rejected, the task becomes `sonnet`: no fourth worker is started, and the Sonnet orchestrator does that task itself (`takeover <id>`, work in the worktree, `submit <id>`, then the normal review and `accept`).
