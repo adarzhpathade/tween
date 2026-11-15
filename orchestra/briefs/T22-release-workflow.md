@@ -7,7 +7,7 @@ A GitHub Release workflow that builds installers when a `v*` tag is pushed. Do N
 1. Add `.github/workflows/release.yml`, triggered on `push: tags: ['v*']` and `workflow_dispatch` (dispatch builds artifacts but does not publish).
 2. Build with `tauri-action` (pin an exact version) or `npx tauri build`:
    - Windows x64: NSIS `setup.exe`.
-   - macOS: aarch64 and x64 `.dmg` (matrix runners `macos-latest` and a x64 runner).
+   - macOS: aarch64 `.dmg` only (Apple Silicon, `macos-latest`); no x64 or Intel build.
    - Linux: `AppImage` and `.deb` (ubuntu-22.04, install the needed system packages).
 3. Create the GitHub Release as a draft with notes generated from a template file `.github/release-notes.md`, covering:
    - What Tween is (no telemetry).
@@ -20,3 +20,7 @@ A GitHub Release workflow that builds installers when a `v*` tag is pushed. Do N
 ## Must not change
 
 App source, `app/src-tauri/icons`. No secrets: no signing keys are used.
+
+## Supported systems (user decision)
+
+Intel Macs (x86_64) are not supported. Update the README supported-systems text to say "macOS on Apple Silicon only" and mention it in the release notes template.
