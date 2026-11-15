@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "test:long": "cargo test --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture",
-    "bench": "cargo run --manifest-path src-tauri/Cargo.toml --bin tween-bench"
+    "bench": "cargo run --release --manifest-path src-tauri/Cargo.toml --bin tween-bench"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

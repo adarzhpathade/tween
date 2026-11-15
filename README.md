@@ -62,10 +62,12 @@ All numbers below are **measured**, not estimated. Each row says which version a
 | 0.1.0 reference pipeline | File (PNG on disk) | Smooth, to 60 fps | **14.7** | — |
 | 0.1.0 reference pipeline | File (PNG on disk) | Fast, 2× | **18.0** | ~27 min |
 | 0.1.0 reference pipeline | File (PNG on disk) | Detail, 2× | **14.6** | ~33 min |
-| Speed update 1 (quick wins) | File, tuned | Smooth, 2× | *pending* | *pending* |
+| Speed update 1 (quick wins, Rust pipeline) | File, tuned | Smooth, 2× | **17.7** | ~27 min |
 | Speed update 2 (streaming engine) | Stream (no disk) | Smooth, 2× | *pending* | *pending* |
 
 **GPU self-test on the same machine** (onboarding runs a short interpolation on each GPU and picks the fastest): RTX 4050 Laptop **1.6 s**, Intel UHD 770 **4.9 s**. Tween chose the RTX.
+
+**Speed update 1 result:** no measurable change on this clip (17.7 vs 17.6 output fps, same machine, measured back to back on 2026-11-15). The 8-second clip fits in a single chunk, so fewer model reloads and overlapping chunks cannot help here. Inside the job, RIFE took 15.7 s of the 21.7 s total, and most of that is RIFE reading and writing PNG files rather than GPU work. Longer videos may gain a little from the chunk changes; the big step is the streaming engine below.
 
 **What these numbers tell us:** Fast (the smallest model) was no quicker than Smooth. The GPU is not the limit today. Most of the time goes into writing and reading frame images on disk, and reloading the model for each chunk. That is exactly what the two speed updates target:
 
