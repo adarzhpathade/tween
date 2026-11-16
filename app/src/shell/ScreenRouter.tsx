@@ -81,6 +81,12 @@ export const ScreenProvider: React.FC<ScreenProviderProps> = ({
       if (stateParam === "open") return "ready";
       if (stateParam === "proc") return "processing";
       if (params.has("step")) return "onboarding";
+      if (
+        import.meta.env.DEV &&
+        (params.has("custom") || params.has("customval") || params.has("src"))
+      ) {
+        return "ready";
+      }
     }
     return initialScreen;
   });
@@ -167,7 +173,7 @@ export const ScreenRouter: React.FC = () => {
     setSettingsOpen(false);
   }, []);
   const [videoLoaded, setVideoLoaded] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && import.meta.env.DEV) {
       const params = new URLSearchParams(window.location.search);
       if (
         params.get("mock") === "1" ||

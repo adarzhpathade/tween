@@ -39,7 +39,7 @@ export function computeMinCustomFps(sourceFps: number | null): number {
 
 export function computeFpsRows(
   sourceFps: number | null,
-  customFps: number | null
+  customFps: number | string | null | undefined
 ): FpsRow[] {
   if (!sourceFps) {
     return [
@@ -82,11 +82,21 @@ export function computeFpsRows(
   }));
 
   // 3. Custom row
+  // While custom fps holds an invalid value (below min, above max, empty or non-numeric),
+  // the Custom row must not be computed from it.
+  let validCustomFps: number | null = null;
+  if (customFps !== null && customFps !== undefined) {
+    const check = checkCustomVal(String(customFps), sourceFps);
+    if (!check.err && check.v !== undefined) {
+      validCustomFps = check.v;
+    }
+  }
+
   const customRow: FpsRow = {
     key: "Custom",
     label: "Custom",
-    sublabel: customFps !== null ? `${customFps} fps` : "fps",
-    fps: customFps,
+    sublabel: validCustomFps !== null ? `${validCustomFps} fps` : "fps",
+    fps: validCustomFps,
     isCustom: true,
   };
 

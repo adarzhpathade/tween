@@ -76,6 +76,9 @@ pub fn calculate_tween_temp_size(root: &Path) -> u64 {
 }
 
 pub fn delete_tween_temp_entries(root: &Path) {
+    if !root.exists() {
+        return;
+    }
     if let Ok(entries) = std::fs::read_dir(root) {
         for entry in entries.flatten() {
             if let Ok(name) = entry.file_name().into_string() {
@@ -95,15 +98,20 @@ pub fn delete_tween_temp_entries(root: &Path) {
 pub fn clean_temp(root: Option<&Path>) {
     let tmp = match root {
         Some(r) => r.to_path_buf(),
-        None => std::env::temp_dir(),
+        None => {
+            let default_out = compute_default_output_folder();
+            super::resolve_temp_root(None, &default_out.to_string_lossy())
+        }
     };
-    if let Ok(entries) = std::fs::read_dir(tmp) {
-        for entry in entries.flatten() {
-            if let Ok(name) = entry.file_name().into_string() {
-                if name.starts_with("tween-") && !name.starts_with("tween-selftest") {
-                    let p = entry.path();
-                    if p.is_dir() {
-                        let _ = std::fs::remove_dir_all(&p);
+    if tmp.exists() {
+        if let Ok(entries) = std::fs::read_dir(tmp) {
+            for entry in entries.flatten() {
+                if let Ok(name) = entry.file_name().into_string() {
+                    if name.starts_with("tween-") && !name.starts_with("tween-selftest") {
+                        let p = entry.path();
+                        if p.is_dir() {
+                            let _ = std::fs::remove_dir_all(&p);
+                        }
                     }
                 }
             }
@@ -111,26 +119,51 @@ pub fn clean_temp(root: Option<&Path>) {
     }
 }
 
-#[tauri::command]
-pub fn storage_info() -> Result<StorageInfo, String> {
-    let temp_dir_path = std::env::temp_dir();
-    let free = crate::setup::free_disk_space(&temp_dir_path).unwrap_or(0);
+pub fn compute_storage_info(custom_temp: Option<&str>) -> StorageInfo {
+    let default_out = compute_default_output_folder();
+    let temp_dir_path = super::resolve_temp_root(custom_temp, &default_out.to_string_lossy());
+    let mut check_dir = temp_dir_path.clone();
+    while !check_dir.exists() {
+        if let Some(parent) = check_dir.parent() {
+            if parent == check_dir {
+                break;
+            }
+            check_dir = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    let free = crate::setup::free_disk_space(&check_dir).unwrap_or(0);
     let in_use = calculate_tween_temp_size(&temp_dir_path);
-    Ok(StorageInfo {
+    StorageInfo {
         temp_dir: temp_dir_path.to_string_lossy().to_string(),
         free_bytes: free,
         in_use_bytes: in_use,
-    })
+    }
+}
+
+pub fn execute_clear_temp(custom_temp: Option<&str>) -> std::path::PathBuf {
+    let default_out = compute_default_output_folder();
+    let temp_dir = super::resolve_temp_root(custom_temp, &default_out.to_string_lossy());
+    delete_tween_temp_entries(&temp_dir);
+    temp_dir
 }
 
 #[tauri::command]
-pub async fn clear_temp(state: tauri::State<'_, PipelineState>) -> Result<(), String> {
+pub fn storage_info(custom_temp: Option<String>) -> Result<StorageInfo, String> {
+    Ok(compute_storage_info(custom_temp.as_deref()))
+}
+
+#[tauri::command]
+pub async fn clear_temp(
+    custom_temp: Option<String>,
+    state: tauri::State<'_, PipelineState>,
+) -> Result<(), String> {
     let lock = state.inner().0.lock().await;
     if lock.is_some() {
         return Err("Cannot clear temporary files while a job is running".into());
     }
-    let temp_dir = std::env::temp_dir();
-    delete_tween_temp_entries(&temp_dir);
+    execute_clear_temp(custom_temp.as_deref());
     Ok(())
 }
 
@@ -222,5 +255,85 @@ mod tests {
         let folders = default_folders(Some(custom.to_string())).expect("default_folders should succeed");
         assert_eq!(folders.temp, custom);
         assert!(std::path::Path::new(&folders.output).ends_with("Tween"));
+    }
+
+    #[test]
+    fn test_storage_info_with_custom_temp() {
+        let test_root = test_temp_dir("storage-custom");
+        let tween_dir = test_root.join("tween-job-xyz");
+        std::fs::create_dir_all(&tween_dir).unwrap();
+        std::fs::write(tween_dir.join("frame.png"), vec![0u8; 1024]).unwrap();
+
+        let info = compute_storage_info(Some(&test_root.to_string_lossy()));
+        assert_eq!(info.temp_dir, test_root.to_string_lossy().to_string());
+        assert_eq!(info.in_use_bytes, 1024);
+        assert!(info.free_bytes > 0);
+
+        let _ = std::fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn test_clear_temp_with_custom_temp_only_deletes_subfolder_never_parent() {
+        let test_root = test_temp_dir("clear-custom");
+
+        // Tween's own subfolder
+        let tween_dir = test_root.join("tween-job-1");
+        std::fs::create_dir_all(&tween_dir).unwrap();
+        std::fs::write(tween_dir.join("frame.png"), vec![0u8; 2048]).unwrap();
+
+        // Another Tween subfolder
+        let tween_cache = test_root.join("tween-cache");
+        std::fs::create_dir_all(&tween_cache).unwrap();
+        std::fs::write(tween_cache.join("cache.dat"), vec![0u8; 512]).unwrap();
+
+        // Non-Tween directory (user's folder)
+        let user_dir = test_root.join("my-project");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        std::fs::write(user_dir.join("notes.txt"), b"important user notes").unwrap();
+
+        // Non-Tween file (user's file)
+        let user_file = test_root.join("document.pdf");
+        std::fs::write(&user_file, b"important doc").unwrap();
+
+        // Verify initial state
+        assert!(test_root.exists(), "Custom temp root must exist");
+        assert_eq!(calculate_tween_temp_size(&test_root), 2048 + 512);
+
+        // Run execute_clear_temp with custom temp folder
+        let cleared_dir = execute_clear_temp(Some(&test_root.to_string_lossy()));
+        assert_eq!(cleared_dir, test_root);
+
+        // CRITICAL: Parent directory MUST still exist
+        assert!(
+            test_root.exists(),
+            "clear_temp must only delete Tween's own subfolder, never the parent"
+        );
+
+        // User files and directories MUST still exist
+        assert!(
+            user_dir.exists(),
+            "Non-Tween user directory must not be deleted by clear_temp"
+        );
+        assert!(
+            user_file.exists(),
+            "Non-Tween user file must not be deleted by clear_temp"
+        );
+        assert_eq!(
+            std::fs::read(&user_file).unwrap(),
+            b"important doc"
+        );
+
+        // Tween's own subfolders MUST be deleted
+        assert!(
+            !tween_dir.exists(),
+            "Tween's own subfolder must be deleted by clear_temp"
+        );
+        assert!(
+            !tween_cache.exists(),
+            "Tween's own subfolder must be deleted by clear_temp"
+        );
+        assert_eq!(calculate_tween_temp_size(&test_root), 0);
+
+        let _ = std::fs::remove_dir_all(&test_root);
     }
 }

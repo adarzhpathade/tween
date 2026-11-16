@@ -103,6 +103,37 @@ test('computeFpsRows with applied custom value: Custom reads <val> fps', () => {
   const rows = computeFpsRows(24, 90);
   assert.strictEqual(rows[5].label, 'Custom');
   assert.strictEqual(rows[5].sublabel, '90 fps');
+  assert.strictEqual(rows[5].fps, 90);
+});
+
+test('computeFpsRows with invalid custom value: Custom row is not computed from it', () => {
+  // Below min: 50 is below min 61 for 60 fps source
+  const rowsBelow = computeFpsRows(60, 50);
+  const customBelow = rowsBelow.find((r) => r.isCustom);
+  assert.strictEqual(customBelow.label, 'Custom');
+  assert.strictEqual(customBelow.sublabel, 'fps');
+  assert.strictEqual(customBelow.fps, null);
+
+  // Above max: 300 is above max 240
+  const rowsAbove = computeFpsRows(60, 300);
+  const customAbove = rowsAbove.find((r) => r.isCustom);
+  assert.strictEqual(customAbove.label, 'Custom');
+  assert.strictEqual(customAbove.sublabel, 'fps');
+  assert.strictEqual(customAbove.fps, null);
+
+  // Non-numeric
+  const rowsNaN = computeFpsRows(60, 'abc');
+  const customNaN = rowsNaN.find((r) => r.isCustom);
+  assert.strictEqual(customNaN.label, 'Custom');
+  assert.strictEqual(customNaN.sublabel, 'fps');
+  assert.strictEqual(customNaN.fps, null);
+
+  // Empty string
+  const rowsEmpty = computeFpsRows(60, '');
+  const customEmpty = rowsEmpty.find((r) => r.isCustom);
+  assert.strictEqual(customEmpty.label, 'Custom');
+  assert.strictEqual(customEmpty.sublabel, 'fps');
+  assert.strictEqual(customEmpty.fps, null);
 });
 
 test('checkCustomVal and getCustomFpsHint: hint text rule handles valid, empty, and bounds', () => {
