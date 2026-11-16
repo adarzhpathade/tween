@@ -280,62 +280,6 @@ pub struct ExtractorSync {
     pub failed: Arc<Mutex<Option<String>>>,
 }
 
-static FFMPEG_SUPPORTS_FPS_MODE: std::sync::Mutex<Option<std::collections::HashMap<String, bool>>> =
-    std::sync::Mutex::new(None);
-
-pub fn is_fps_mode_supported_for_version(version_output: &str) -> bool {
-    if let Some(first_line) = version_output.lines().next() {
-        if let Some(pos) = first_line.find("version ") {
-            let ver = &first_line[pos + 8..].trim_start();
-            let ver_clean = ver.strip_prefix('n').unwrap_or(ver);
-            return !(ver_clean.starts_with("0.")
-                || ver_clean.starts_with("1.")
-                || ver_clean.starts_with("2.")
-                || ver_clean.starts_with("3.")
-                || ver_clean.starts_with("4."));
-        }
-    }
-    true
-}
-
-pub fn check_ffmpeg_supports_fps_mode(ffmpeg_bin: &str) -> bool {
-    if let Ok(guard) = FFMPEG_SUPPORTS_FPS_MODE.lock() {
-        if let Some(map) = guard.as_ref() {
-            if let Some(&val) = map.get(ffmpeg_bin) {
-                return val;
-            }
-        }
-    }
-
-    let mut cmd = std::process::Command::new(ffmpeg_bin);
-    cmd.args(["-hide_banner", "-version"]);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
-    let supported = match cmd.output() {
-        Ok(out) if out.status.success() => {
-            let s = String::from_utf8_lossy(&out.stdout);
-            is_fps_mode_supported_for_version(&s)
-        }
-        _ => true,
-    };
-
-    if let Ok(mut guard) = FFMPEG_SUPPORTS_FPS_MODE.lock() {
-        let map = guard.get_or_insert_with(std::collections::HashMap::new);
-        map.insert(ffmpeg_bin.to_string(), supported);
-    }
-    supported
-}
-
-pub fn fps_mode_args(ffmpeg_bin: &str, mode: &str) -> Vec<String> {
-    if check_ffmpeg_supports_fps_mode(ffmpeg_bin) {
-        vec!["-fps_mode".to_string(), mode.to_string()]
-    } else {
-        vec!["-vsync".to_string(), mode.to_string()]
-    }
-}
 
 pub fn spawn_streaming_extractor(
     ffmpeg: &str,
@@ -1005,13 +949,15 @@ where
     let mut an_cmd = tokio::process::Command::new(&cfg.ffmpeg);
     an_cmd.args(["-v", "error"]);
     an_cmd.args(&trim_args);
+    let (an_fps_flag, an_fps_val) = fps_mode_args(&cfg.ffmpeg, "passthrough");
     an_cmd.args([
         "-i",
         &info.file,
         "-map",
         "0:v:0",
+        an_fps_flag,
+        an_fps_val,
     ]);
-    an_cmd.args(fps_mode_args(&cfg.ffmpeg, "passthrough"));
     an_cmd.args([
         "-vf",
         &vf,
@@ -1121,8 +1067,8 @@ where
     dec_cmd.args(["-y", "-v", "error"]);
     dec_cmd.args(&trim_args);
     dec_cmd.args(["-i", &info.file]);
-    dec_cmd.args(["-map", "0:v:0"]);
-    dec_cmd.args(fps_mode_args(&cfg.ffmpeg, "passthrough"));
+    let (dec_fps_flag, dec_fps_val) = fps_mode_args(&cfg.ffmpeg, "passthrough");
+    dec_cmd.args(["-map", "0:v:0", dec_fps_flag, dec_fps_val]);
     dec_cmd.args(["-an", "-sn"]);
     dec_cmd.args(["-vf", &scale_in]);
     dec_cmd.args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
@@ -1281,7 +1227,9 @@ where
     ff_args.push("-color_range".to_string());
     ff_args.push("tv".to_string());
 
-    ff_args.extend(fps_mode_args(&cfg.ffmpeg, "cfr"));
+    let (cfr_fps_flag, cfr_fps_val) = fps_mode_args(&cfg.ffmpeg, "cfr");
+    ff_args.push(cfr_fps_flag.to_string());
+    ff_args.push(cfr_fps_val.to_string());
     ff_args.push("-t".to_string());
     ff_args.push(format!("{:.6}", total as f64 / r.out_fps));
 
@@ -1909,7 +1857,6 @@ where
     });
 
     let mut rife_total_ms = 0u128;
-    #[cfg(debug_assertions)]
     let mut cut_fix_total_ms = 0u128;
     let peak_temp_bytes = Arc::new(AtomicU64::new(0));
     peak_temp_bytes.fetch_max(dir_size(tmp), Ordering::Relaxed);
@@ -2188,7 +2135,6 @@ where
         rife_total_ms += t_rife_chunk.elapsed().as_millis();
 
         // replace frames that would blend across a scene cut
-        #[cfg(debug_assertions)]
         let t_cut = Instant::now();
         let fixes = cut_fixes(
             &super::types::Chunk {
@@ -2205,10 +2151,7 @@ where
             let dst_f = cout.join(format!("{:08}.png", f.i + 1));
             let _ = std::fs::copy(&src_f, &dst_f);
         }
-        #[cfg(debug_assertions)]
-        {
-            cut_fix_total_ms += t_cut.elapsed().as_millis();
-        }
+        cut_fix_total_ms += t_cut.elapsed().as_millis();
 
         // hand this chunk to the encoder feed queue
         feed_tx
