@@ -1,9 +1,13 @@
 use super::clean::dir_size;
 use super::encoders::get_encoder;
-use super::models::{rife_exe, MODELS};
-use super::plan::{chunk_size_with_disk, cut_fixes, plan_chunks, ratio, rife_threads};
+use super::models::{rife_exe, rife_stream_exe, MODELS};
+use super::plan::{
+    build_frame_times, chunk_size_with_disk, cut_fixes, plan_chunks, ratio, rife_threads,
+    serialize_frame_times,
+};
 use super::probe::colour_of;
 use super::splitter::PngSplitter;
+use super::ssim::calculate_ssim;
 use super::types::{
     ColourInput, JobFinished, JobProgressEvent, JobRequest, PipelineConfig, StageTimes,
 };
@@ -275,6 +279,7 @@ pub struct ExtractorSync {
     pub ended: Arc<AtomicBool>,
     pub failed: Arc<Mutex<Option<String>>>,
 }
+
 
 pub fn spawn_streaming_extractor(
     ffmpeg: &str,
@@ -571,6 +576,850 @@ where
     }
 }
 
+static STREAM_SELF_TEST_CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+pub async fn check_stream_engine_supported(cfg: &PipelineConfig) -> bool {
+    let cache_key = format!("{:?}_{:?}", cfg.rife_dir, cfg.rife_stream_cmd);
+    if let Ok(lock) = STREAM_SELF_TEST_CACHE.lock() {
+        if let Some(&res) = lock.get(&cache_key) {
+            return res;
+        }
+    }
+
+    let has_stream = if let Some(cmd) = &cfg.rife_stream_cmd {
+        !cmd.is_empty()
+    } else {
+        let stream_exe = rife_stream_exe(Path::new(&cfg.rife_dir));
+        stream_exe.exists()
+    };
+
+    if !has_stream {
+        eprintln!(
+            "[runner] Streaming RIFE engine binary not found at {:?}; using file mode",
+            rife_stream_exe(Path::new(&cfg.rife_dir))
+        );
+        if let Ok(mut lock) = STREAM_SELF_TEST_CACHE.lock() {
+            lock.insert(cache_key, false);
+        }
+        return false;
+    }
+
+    let passed = run_stream_self_test_internal(cfg).await;
+    if let Ok(mut lock) = STREAM_SELF_TEST_CACHE.lock() {
+        lock.insert(cache_key, passed);
+    }
+    passed
+}
+
+async fn run_stream_self_test_internal(cfg: &PipelineConfig) -> bool {
+    let tmp = std::env::temp_dir().join(format!("tween-stream-selftest-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    if std::fs::create_dir_all(&tmp).is_err() {
+        return false;
+    }
+
+    let res = run_stream_self_test_work(cfg, &tmp).await;
+    let _ = std::fs::remove_dir_all(&tmp);
+    res
+}
+
+async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
+    let w = 64usize;
+    let h = 64usize;
+    let frame_bytes = w * h * 3;
+    let mut input_bytes = Vec::with_capacity(5 * frame_bytes);
+
+    for f in 0..5 {
+        let mut frame = vec![0u8; frame_bytes];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) * 3;
+                frame[idx] = ((x * 4 + f * 50) % 256) as u8;
+                frame[idx + 1] = ((y * 4 + f * 35) % 256) as u8;
+                frame[idx + 2] = (((x + y) * 2 + f * 45) % 256) as u8;
+            }
+        }
+        input_bytes.extend_from_slice(&frame);
+    }
+
+    let times = build_frame_times(5, 10, &HashSet::new());
+    let times_path = tmp.join("selftest_times.dat");
+    if tokio::fs::write(&times_path, serialize_frame_times(&times)).await.is_err() {
+        return false;
+    }
+
+    let rife_dir_path = PathBuf::from(&cfg.rife_dir);
+    let model_path = rife_dir_path.join("rife-v4.26");
+    let (stream_bin, stream_pre) = if let Some(rc) = &cfg.rife_stream_cmd {
+        if !rc.is_empty() {
+            (rc[0].clone(), rc[1..].to_vec())
+        } else {
+            (rife_stream_exe(&rife_dir_path).to_string_lossy().to_string(), Vec::new())
+        }
+    } else {
+        (rife_stream_exe(&rife_dir_path).to_string_lossy().to_string(), Vec::new())
+    };
+
+    let mut stream_cmd = tokio::process::Command::new(&stream_bin);
+    stream_cmd.args(&stream_pre);
+    stream_cmd.args([
+        "--stream",
+        times_path.to_str().unwrap(),
+        "-w",
+        "64",
+        "-h",
+        "64",
+        "-m",
+        model_path.to_str().unwrap(),
+        "-g",
+        "0",
+        "-j",
+        "1:1:1",
+    ]);
+    if rife_dir_path.exists() {
+        stream_cmd.current_dir(&rife_dir_path);
+    }
+    stream_cmd.stdin(std::process::Stdio::piped());
+    stream_cmd.stdout(std::process::Stdio::piped());
+    stream_cmd.stderr(std::process::Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        stream_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut stream_child = match stream_cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    if let Some(mut stdin) = stream_child.stdin.take() {
+        let input_copy = input_bytes.clone();
+        tokio::spawn(async move {
+            let _ = stdin.write_all(&input_copy).await;
+            let _ = stdin.flush().await;
+        });
+    }
+
+    let mut stream_out_bytes = Vec::new();
+    if let Some(mut stdout) = stream_child.stdout.take() {
+        if stdout.read_to_end(&mut stream_out_bytes).await.is_err() {
+            return false;
+        }
+    }
+
+    let stream_status = match stream_child.wait().await {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if !stream_status.success() || stream_out_bytes.len() != 10 * frame_bytes {
+        return false;
+    }
+
+    let in_dir = tmp.join("in");
+    let out_dir = tmp.join("out");
+    if std::fs::create_dir_all(&in_dir).is_err() || std::fs::create_dir_all(&out_dir).is_err() {
+        return false;
+    }
+
+    let mut ff_png_cmd = tokio::process::Command::new(&cfg.ffmpeg);
+    ff_png_cmd.args([
+        "-y",
+        "-v",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        "64x64",
+        "-i",
+        "-",
+        in_dir.join("%08d.png").to_str().unwrap(),
+    ]);
+    ff_png_cmd.stdin(std::process::Stdio::piped());
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        ff_png_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut ff_png_child = match ff_png_cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    if let Some(mut stdin) = ff_png_child.stdin.take() {
+        let input_copy = input_bytes.clone();
+        tokio::spawn(async move {
+            let _ = stdin.write_all(&input_copy).await;
+            let _ = stdin.flush().await;
+        });
+    }
+    let png_status = match ff_png_child.wait().await {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if !png_status.success() {
+        return false;
+    }
+
+    let (file_bin, file_pre) = if let Some(rc) = &cfg.rife_cmd {
+        if !rc.is_empty() {
+            (rc[0].clone(), rc[1..].to_vec())
+        } else {
+            (rife_exe(&rife_dir_path).to_string_lossy().to_string(), Vec::new())
+        }
+    } else {
+        (rife_exe(&rife_dir_path).to_string_lossy().to_string(), Vec::new())
+    };
+
+    let mut file_cmd = tokio::process::Command::new(&file_bin);
+    file_cmd.args(&file_pre);
+    file_cmd.args([
+        "-i",
+        in_dir.to_str().unwrap(),
+        "-o",
+        out_dir.to_str().unwrap(),
+        "-m",
+        model_path.to_str().unwrap(),
+        "-n",
+        "10",
+        "-g",
+        "0",
+        "-j",
+        "1:1:1",
+    ]);
+    if rife_dir_path.exists() {
+        file_cmd.current_dir(&rife_dir_path);
+    }
+    file_cmd.stderr(std::process::Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        file_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut file_child = match file_cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let f_status = match file_child.wait().await {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if !f_status.success() {
+        return false;
+    }
+
+    let mut ff_read_cmd = tokio::process::Command::new(&cfg.ffmpeg);
+    ff_read_cmd.args([
+        "-v",
+        "error",
+        "-i",
+        out_dir.join("%08d.png").to_str().unwrap(),
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-",
+    ]);
+    ff_read_cmd.stdout(std::process::Stdio::piped());
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        ff_read_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut ff_read_child = match ff_read_cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let mut file_out_bytes = Vec::new();
+    if let Some(mut stdout) = ff_read_child.stdout.take() {
+        if stdout.read_to_end(&mut file_out_bytes).await.is_err() {
+            return false;
+        }
+    }
+    let r_status = match ff_read_child.wait().await {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if !r_status.success() || file_out_bytes.len() != 10 * frame_bytes {
+        return false;
+    }
+
+    for i in 0..10 {
+        let stream_frame = &stream_out_bytes[i * frame_bytes..(i + 1) * frame_bytes];
+        let file_frame = &file_out_bytes[i * frame_bytes..(i + 1) * frame_bytes];
+
+        if i % 2 == 0 {
+            if stream_frame != file_frame {
+                return false;
+            }
+        } else {
+            let ssim = calculate_ssim(stream_frame, file_frame, w, h);
+            if ssim < 0.995 {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+async fn run_stream_pipeline<F>(
+    cfg: &PipelineConfig,
+    job: &JobRequest,
+    tmp: &Path,
+    emit: Arc<F>,
+    cancel: Arc<AtomicBool>,
+    procs: Arc<ActiveProcesses>,
+    t0: Instant,
+) -> Result<JobFinished, String>
+where
+    F: Fn(JobProgressEvent) + Send + Sync + 'static,
+{
+    let info = &job.info;
+    let r = ratio(info, &job.target);
+
+    let model_id = if !job.model.is_empty() && (cfg.models.is_empty() || cfg.models.contains(&job.model)) {
+        &job.model
+    } else if let Some(first_cfg) = cfg.models.first() {
+        first_cfg
+    } else {
+        MODELS[0].id
+    };
+
+    let enc_id = if !job.encoder.is_empty() && (cfg.encoders.is_empty() || cfg.encoders.contains(&job.encoder)) {
+        &job.encoder
+    } else if let Some(first_enc) = cfg.encoders.first() {
+        first_enc
+    } else {
+        "libx264"
+    };
+    let enc = get_encoder(enc_id);
+
+    let col = if !info.colour.matrix.is_empty() {
+        info.colour.clone()
+    } else {
+        colour_of(&ColourInput {
+            height: info.height,
+            ..Default::default()
+        })
+    };
+
+    let trim_args: Vec<String> = if let Some(trim) = &job.trim {
+        vec![
+            "-ss".to_string(),
+            trim.start.to_string(),
+            "-to".to_string(),
+            trim.end.to_string(),
+        ]
+    } else {
+        Vec::new()
+    };
+
+    let scale_in = format!(
+        "scale=in_color_matrix={}:in_range={}:flags=bicubic+accurate_rnd+full_chroma_int,format=rgb24",
+        col.matrix, col.range
+    );
+
+    let t_analyse = Instant::now();
+    emit(JobProgressEvent {
+        stage: "analyse".into(),
+        pct: Some(0.0),
+        done: None,
+        total: None,
+        speed: None,
+        eta: None,
+        preview: None,
+        note: None,
+    });
+
+    let scenes_file = "scenes.txt";
+    let thr = job.scene_threshold.unwrap_or(10.0);
+    let vf = if job.scene_detect == Some(false) {
+        "scale=-2:144".to_string()
+    } else {
+        format!(
+            "scale=-2:270,scdet=threshold={},metadata=mode=print:key=lavfi.scd.time:file={}",
+            thr, scenes_file
+        )
+    };
+
+    let mut an_cmd = tokio::process::Command::new(&cfg.ffmpeg);
+    an_cmd.args(["-v", "error"]);
+    an_cmd.args(&trim_args);
+    let (an_fps_flag, an_fps_val) = fps_mode_args(&cfg.ffmpeg, "passthrough");
+    an_cmd.args([
+        "-i",
+        &info.file,
+        "-map",
+        "0:v:0",
+        an_fps_flag,
+        an_fps_val,
+    ]);
+    an_cmd.args([
+        "-vf",
+        &vf,
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        "-f",
+        "null",
+        "-",
+    ]);
+    an_cmd.current_dir(tmp);
+    an_cmd.stdout(std::process::Stdio::piped());
+    an_cmd.stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        an_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut an_child = an_cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start analysis: {}", e))?;
+    let an_pid = an_child.id().unwrap_or(0);
+    procs.add(an_pid).await;
+
+    let mut count = 0usize;
+    if let Some(mut stdout) = an_child.stdout.take() {
+        let emit_clone = emit.clone();
+        let info_frames = info.frames;
+        let mut buf = [0u8; 4096];
+        let mut text = String::new();
+        while let Ok(n) = stdout.read(&mut buf).await {
+            if n == 0 {
+                break;
+            }
+            text.push_str(&String::from_utf8_lossy(&buf[..n]));
+            while let Some(pos) = text.find('\n') {
+                let line = text[..pos].trim();
+                if let Some(stripped) = line.strip_prefix("frame=") {
+                    if let Ok(c) = stripped.trim().parse::<usize>() {
+                        count = c;
+                        let pct = (c as f64) / (info_frames.max(1) as f64);
+                        emit_clone(JobProgressEvent {
+                            stage: "analyse".into(),
+                            pct: Some(pct.min(1.0)),
+                            done: None,
+                            total: None,
+                            speed: None,
+                            eta: None,
+                            preview: None,
+                            note: None,
+                        });
+                    }
+                }
+                text.drain(..pos + 1);
+            }
+        }
+    }
+
+    let an_status = an_child
+        .wait()
+        .await
+        .map_err(|e| format!("Analysis process error: {}", e))?;
+    procs.remove(an_pid).await;
+
+    if cancel.load(Ordering::SeqCst) {
+        return Err("cancelled".into());
+    }
+
+    if !an_status.success() {
+        let mut err_str = String::new();
+        if let Some(mut stderr) = an_child.stderr.take() {
+            let _ = stderr.read_to_string(&mut err_str).await;
+        }
+        return Err(format!("Analysis failed (exit {}).\n{}", an_status, err_str));
+    }
+
+    let mut cuts = HashSet::new();
+    let scenes_path = tmp.join(scenes_file);
+    if let Ok(scenes_content) = std::fs::read_to_string(&scenes_path) {
+        for line in scenes_content.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("frame:") {
+                let frame_str = rest.split_whitespace().next().unwrap_or("");
+                if let Ok(f) = frame_str.parse::<usize>() {
+                    cuts.insert(f);
+                }
+            }
+        }
+    }
+
+    if count < 2 {
+        return Err("The video has fewer than two frames.".into());
+    }
+
+    let analyse_elapsed_ms = t_analyse.elapsed().as_millis() as u64;
+    let total = ((count as f64) * (r.p as f64) / (r.q as f64)).round() as usize;
+
+    let times = build_frame_times(count, total, &cuts);
+    let times_path = tmp.join("times.dat");
+    tokio::fs::write(&times_path, serialize_frame_times(&times))
+        .await
+        .map_err(|e| format!("Failed to write times file: {}", e))?;
+
+    let mut dec_cmd = tokio::process::Command::new(&cfg.ffmpeg);
+    dec_cmd.args(["-y", "-v", "error"]);
+    dec_cmd.args(&trim_args);
+    dec_cmd.args(["-i", &info.file]);
+    let (dec_fps_flag, dec_fps_val) = fps_mode_args(&cfg.ffmpeg, "passthrough");
+    dec_cmd.args(["-map", "0:v:0", dec_fps_flag, dec_fps_val]);
+    dec_cmd.args(["-an", "-sn"]);
+    dec_cmd.args(["-vf", &scale_in]);
+    dec_cmd.args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+    dec_cmd.stdout(std::process::Stdio::piped());
+    dec_cmd.stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        dec_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut dec_child = dec_cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn decoder: {}", e))?;
+    let dec_pid = dec_child.id().unwrap_or(0);
+    procs.add(dec_pid).await;
+    let mut dec_stdout = dec_child.stdout.take().ok_or("Failed to open decoder stdout")?;
+
+    let gpu = match (&cfg.mode[..], &cfg.gpu) {
+        ("gpu", Some(g)) => g.id.to_string(),
+        _ => "-1".to_string(),
+    };
+    let cpu_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let is_gpu = cfg.mode == "gpu";
+    let is_integrated = cfg
+        .gpu
+        .as_ref()
+        .map(|g| g.integrated)
+        .unwrap_or(true);
+    let initial_jobs = rife_threads(cpu_threads, is_gpu, is_integrated);
+
+    let rife_dir_path = PathBuf::from(&cfg.rife_dir);
+    let model_path = rife_dir_path.join(model_id);
+    let (rife_bin, pre_args) = if let Some(rc) = &cfg.rife_stream_cmd {
+        if !rc.is_empty() {
+            (rc[0].clone(), rc[1..].to_vec())
+        } else {
+            (rife_stream_exe(&rife_dir_path).to_string_lossy().to_string(), Vec::new())
+        }
+    } else {
+        (rife_stream_exe(&rife_dir_path).to_string_lossy().to_string(), Vec::new())
+    };
+
+    let mut rife_cmd = tokio::process::Command::new(&rife_bin);
+    rife_cmd.args(&pre_args);
+    rife_cmd.args([
+        "--stream",
+        times_path.to_str().unwrap(),
+        "-w",
+        &info.width.to_string(),
+        "-h",
+        &info.height.to_string(),
+        "-m",
+        model_path.to_str().unwrap(),
+        "-g",
+        &gpu,
+        "-j",
+        &initial_jobs,
+    ]);
+    if info.width * info.height > 2560 * 1440 {
+        rife_cmd.arg("-u");
+    }
+    if job.tta.unwrap_or(false) {
+        rife_cmd.arg("-x");
+    }
+    if rife_dir_path.exists() {
+        rife_cmd.current_dir(&rife_dir_path);
+    }
+    rife_cmd.stdin(std::process::Stdio::piped());
+    rife_cmd.stdout(std::process::Stdio::piped());
+    rife_cmd.stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        rife_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut rife_child = rife_cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn RIFE stream: {}", e))?;
+    let rife_pid = rife_child.id().unwrap_or(0);
+    procs.add(rife_pid).await;
+    let mut rife_stdin = rife_child.stdin.take().ok_or("Failed to open RIFE stdin")?;
+    let mut rife_stdout = rife_child.stdout.take().ok_or("Failed to open RIFE stdout")?;
+
+    let is_mp4_mov = {
+        let lower = job.output.to_lowercase();
+        lower.ends_with(".mp4") || lower.ends_with(".mov") || lower.ends_with(".m4v")
+    };
+    let audio = job.keep_audio.unwrap_or(true) && info.has_audio;
+
+    let mut ff_args = vec![
+        "-y".to_string(),
+        "-v".to_string(),
+        "error".to_string(),
+        "-f".to_string(),
+        "rawvideo".to_string(),
+        "-pix_fmt".to_string(),
+        "rgb24".to_string(),
+        "-s".to_string(),
+        format!("{}x{}", info.width, info.height),
+        "-framerate".to_string(),
+        r.out_fps_expr.clone(),
+        "-i".to_string(),
+        "-".to_string(),
+    ];
+
+    ff_args.extend(trim_args.clone());
+    ff_args.push("-i".to_string());
+    ff_args.push(info.file.clone());
+    ff_args.push("-map".to_string());
+    ff_args.push("0:v:0".to_string());
+
+    if audio {
+        let copyable = job.trim.is_none()
+            && is_mp4_mov
+            && matches!(
+                info.audio_codec.as_deref(),
+                Some("aac" | "mp3" | "ac3" | "eac3" | "alac" | "opus" | "flac")
+            );
+        ff_args.push("-map".to_string());
+        ff_args.push("1:a:0?".to_string());
+        if copyable {
+            ff_args.push("-c:a".to_string());
+            ff_args.push("copy".to_string());
+        } else {
+            ff_args.push("-c:a".to_string());
+            ff_args.push("aac".to_string());
+            ff_args.push("-b:a".to_string());
+            ff_args.push("256k".to_string());
+        }
+    }
+
+    let out_vf = format!(
+        "scale=out_color_matrix={}:out_range=tv:flags=bicubic+accurate_rnd+full_chroma_int,format={}",
+        col.matrix, enc.fmt
+    );
+
+    ff_args.push("-map_metadata".to_string());
+    ff_args.push("1".to_string());
+    ff_args.push("-map_chapters".to_string());
+    ff_args.push("-1".to_string());
+    ff_args.push("-vf".to_string());
+    ff_args.push(out_vf);
+
+    ff_args.extend(enc.args(job.quality.unwrap_or(18)));
+
+    ff_args.push("-colorspace".to_string());
+    ff_args.push(col.space.clone());
+    ff_args.push("-color_primaries".to_string());
+    ff_args.push(col.primaries.clone());
+    ff_args.push("-color_trc".to_string());
+    ff_args.push(col.trc.clone());
+    ff_args.push("-color_range".to_string());
+    ff_args.push("tv".to_string());
+
+    let (cfr_fps_flag, cfr_fps_val) = fps_mode_args(&cfg.ffmpeg, "cfr");
+    ff_args.push(cfr_fps_flag.to_string());
+    ff_args.push(cfr_fps_val.to_string());
+    ff_args.push("-t".to_string());
+    ff_args.push(format!("{:.6}", total as f64 / r.out_fps));
+
+    if is_mp4_mov {
+        ff_args.push("-movflags".to_string());
+        ff_args.push("+faststart".to_string());
+    }
+
+    if let Some(parent) = std::path::Path::new(&job.output).parent() {
+        if !parent.as_os_str().is_empty() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    ff_args.push(job.output.clone());
+
+    let mut enc_cmd = tokio::process::Command::new(&cfg.ffmpeg);
+    enc_cmd.args(&ff_args);
+    enc_cmd.stdin(std::process::Stdio::piped());
+    enc_cmd.stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        enc_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut enc_child = enc_cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn encoder: {}", e))?;
+    let enc_pid = enc_child.id().unwrap_or(0);
+    procs.add(enc_pid).await;
+    let mut enc_stdin = enc_child.stdin.take().ok_or("Failed to open encoder stdin")?;
+
+    emit(JobProgressEvent {
+        stage: "interpolate".into(),
+        pct: Some(0.0),
+        done: Some(0),
+        total: Some(total as u64),
+        speed: None,
+        eta: None,
+        preview: None,
+        note: None,
+    });
+
+    let cancel_pipe = cancel.clone();
+    let pipe_dec_task = tokio::spawn(async move {
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            if cancel_pipe.load(Ordering::SeqCst) {
+                break;
+            }
+            let n = match dec_stdout.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => return Err(format!("Decoder read error: {}", e)),
+            };
+            if let Err(e) = rife_stdin.write_all(&buf[..n]).await {
+                return Err(format!("RIFE stdin write error: {}", e));
+            }
+        }
+        let _ = rife_stdin.flush().await;
+        drop(rife_stdin);
+        Ok::<(), String>(())
+    });
+
+    let frame_bytes = (info.width as usize) * (info.height as usize) * 3;
+    let emit_interp = emit.clone();
+    let cancel_interp = cancel.clone();
+    let t_interp = Instant::now();
+    let total_f = total;
+
+    let pipe_enc_task = tokio::spawn(async move {
+        let mut frame_buf = vec![0u8; frame_bytes];
+        let mut count_done = 0u64;
+
+        while count_done < (total_f as u64) {
+            if cancel_interp.load(Ordering::SeqCst) {
+                return Err("cancelled".into());
+            }
+            match rife_stdout.read_exact(&mut frame_buf).await {
+                Ok(_) => {
+                    if let Err(e) = enc_stdin.write_all(&frame_buf).await {
+                        return Err(format!("Encoder stdin write error: {}", e));
+                    }
+                    count_done += 1;
+
+                    if count_done.is_multiple_of(4) || count_done == (total_f as u64) {
+                        let el = t_interp.elapsed().as_secs_f64();
+                        let speed = (count_done as f64) / el.max(0.001);
+                        let eta = if speed > 0.0 {
+                            Some(((total_f as u64).saturating_sub(count_done) as f64) / speed)
+                        } else {
+                            None
+                        };
+                        emit_interp(JobProgressEvent {
+                            stage: "interpolate".into(),
+                            pct: Some((count_done as f64) / (total_f as f64)),
+                            done: Some(count_done),
+                            total: Some(total_f as u64),
+                            speed: Some(speed),
+                            eta,
+                            preview: None,
+                            note: None,
+                        });
+                    }
+                }
+                Err(e) => {
+                    if count_done == (total_f as u64) {
+                        break;
+                    }
+                    return Err(format!(
+                        "Interpolation stream finished prematurely (got {} of {} frames): {}",
+                        count_done, total_f, e
+                    ));
+                }
+            }
+        }
+        drop(enc_stdin);
+        Ok::<u64, String>(count_done)
+    });
+
+    let dec_res = dec_child.wait().await;
+    procs.remove(dec_pid).await;
+    let rife_res = rife_child.wait().await;
+    procs.remove(rife_pid).await;
+
+    let pipe_dec_res = pipe_dec_task.await.map_err(|e| format!("Decoder pipe panic: {}", e))?;
+    let pipe_enc_res = pipe_enc_task.await.map_err(|e| format!("Encoder pipe panic: {}", e))?;
+
+    let enc_res = enc_child.wait().await;
+    procs.remove(enc_pid).await;
+
+    if cancel.load(Ordering::SeqCst) {
+        return Err("cancelled".into());
+    }
+
+    pipe_dec_res?;
+    let encoded = pipe_enc_res?;
+
+    let dec_status = dec_res.map_err(|e| format!("Decoder wait error: {}", e))?;
+    if !dec_status.success() {
+        return Err(format!("Decoder process failed with exit {}", dec_status));
+    }
+
+    let rife_status = rife_res.map_err(|e| format!("RIFE wait error: {}", e))?;
+    if !rife_status.success() {
+        return Err(format!("RIFE stream process failed with exit {}", rife_status));
+    }
+
+    let enc_status = enc_res.map_err(|e| format!("Encoder wait error: {}", e))?;
+    if !enc_status.success() {
+        return Err(format!("Encoder process failed with exit {}", enc_status));
+    }
+
+    let out_size = std::fs::metadata(&job.output).map(|m| m.len()).unwrap_or(0);
+    let seconds = t0.elapsed().as_secs_f64();
+    let interp_ms = t_interp.elapsed().as_millis() as u64;
+
+    emit(JobProgressEvent {
+        stage: "done".into(),
+        pct: Some(1.0),
+        done: Some(encoded),
+        total: Some(total as u64),
+        speed: None,
+        eta: None,
+        preview: None,
+        note: None,
+    });
+
+    Ok(JobFinished {
+        ok: true,
+        cancelled: None,
+        error: None,
+        output: Some(job.output.clone()),
+        engine_mode: Some("stream".into()),
+        seconds: Some(seconds),
+        out_size: Some(out_size),
+        frames: Some(encoded),
+        cuts: Some(cuts.len()),
+        peak_temp_bytes: Some(0),
+        stage_times: Some(StageTimes {
+            analyse_ms: analyse_elapsed_ms,
+            extract_ms: 0,
+            rife_ms: interp_ms,
+            encode_ms: interp_ms,
+        }),
+    })
+}
+
 async fn run_internal<F>(
     cfg: &PipelineConfig,
     job: &JobRequest,
@@ -583,6 +1432,35 @@ async fn run_internal<F>(
 where
     F: Fn(JobProgressEvent) + Send + Sync + 'static,
 {
+    let requested_mode = job
+        .engine_mode
+        .as_deref()
+        .or(cfg.engine_mode.as_deref())
+        .unwrap_or("file");
+
+    if requested_mode == "stream" || requested_mode == "auto" {
+        if check_stream_engine_supported(cfg).await {
+            match run_stream_pipeline(cfg, job, tmp, emit.clone(), cancel.clone(), procs.clone(), t0).await {
+                Ok(finished) => return Ok(finished),
+                Err(_e) => {
+                    eprintln!("[runner] Stream engine failed ({}); falling back to file mode", _e);
+                    let _ = std::fs::remove_file(&job.output);
+                    emit(JobProgressEvent {
+                        stage: "interpolate".into(),
+                        pct: None,
+                        done: None,
+                        total: None,
+                        speed: None,
+                        eta: None,
+                        preview: None,
+                        note: Some("Streaming mode failed; switched to file mode.".into()),
+                    });
+                }
+            }
+        } else if requested_mode == "stream" {
+            eprintln!("[runner] Streaming RIFE engine not available (binary missing or self-test failed); running in file mode");
+        }
+    }
     let info = &job.info;
     let r = ratio(info, &job.target);
 
@@ -1371,6 +2249,7 @@ where
         cancelled: None,
         error: None,
         output: Some(job.output.clone()),
+        engine_mode: Some("file".into()),
         seconds: Some(seconds),
         out_size: Some(out_size),
         frames: Some(encoded),

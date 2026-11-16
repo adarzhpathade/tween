@@ -7,6 +7,7 @@ pub mod plan;
 pub mod probe;
 pub mod runner;
 pub mod splitter;
+pub mod ssim;
 pub mod stats;
 pub mod types;
 
@@ -17,10 +18,10 @@ pub use clean::{
     clean_temp, clear_temp, default_folders, storage_info, DefaultFolders, StorageInfo,
 };
 pub use encoders::{get_encoder, EncoderDef, ENCODERS};
-pub use models::{rife_exe, ModelDef, MODELS};
+pub use models::{rife_exe, rife_stream_exe, ModelDef, MODELS};
 pub use plan::{
-    chunk_size, chunk_size_with_disk, cut_fixes, gcd, parse_rate, plan_chunks, ratio, rife_map,
-    rife_threads,
+    build_frame_times, chunk_size, chunk_size_with_disk, cut_fixes, deserialize_frame_times, gcd,
+    parse_rate, plan_chunks, ratio, rife_map, rife_threads, serialize_frame_times,
 };
 pub use probe::{colour_of, probe};
 pub use runner::{
@@ -28,6 +29,7 @@ pub use runner::{
     run_pipeline, version_supports_fps_mode,
 };
 pub use splitter::PngSplitter;
+pub use ssim::calculate_ssim;
 pub use stats::{sample_system_stats, show_in_folder, SystemMonitorState, SystemStats};
 pub use types::{
     Chunk, ChunkPlan, ColourInfo, ColourInput, CutFix, GpuConfig, JobFinished, JobProgressEvent,
@@ -571,6 +573,8 @@ mod tests {
             encoders: vec!["libx264".into()],
             models: vec!["rife-v4.26".into()],
             rife_cmd: Some(vec!["node".into(), fake_rife.to_string_lossy().to_string()]),
+            engine_mode: None,
+            rife_stream_cmd: None,
         };
 
         struct TestCase {
@@ -699,6 +703,7 @@ mod tests {
                 scene_threshold: Some(10.0),
                 tta: Some(false),
                 chunk_frames: c.chunk_frames,
+                engine_mode: None,
                 cfg: Some(cfg.clone()),
             };
 

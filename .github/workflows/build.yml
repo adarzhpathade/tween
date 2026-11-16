@@ -90,3 +90,106 @@ jobs:
             app/src-tauri/target/**/bundle/deb/*.deb
             app/src-tauri/target/**/bundle/appimage/*.AppImage
           if-no-files-found: warn
+
+  build-rife-stream:
+    name: Build RIFE Stream (${{ matrix.os_name }})
+    runs-on: ${{ matrix.runner_os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_name: windows-x64
+            runner_os: windows-latest
+            ncnn_url: https://github.com/Tencent/ncnn/releases/download/20240410/ncnn-20240410-windows-vs2022.zip
+            ncnn_dir: ncnn-20240410-windows-vs2022
+            binary: build/Release/rife-ncnn-vulkan-stream.exe
+          - os_name: linux-x64
+            runner_os: ubuntu-22.04
+            ncnn_url: https://github.com/Tencent/ncnn/releases/download/20240410/ncnn-20240410-ubuntu-2204.zip
+            ncnn_dir: ncnn-20240410-ubuntu-2204
+            binary: build/rife-ncnn-vulkan-stream
+          - os_name: macos-arm64
+            runner_os: macos-latest
+            arch: arm64
+            ncnn_url: https://github.com/Tencent/ncnn/releases/download/20240410/ncnn-20240410-macos-vulkan.zip
+            binary: build/rife-ncnn-vulkan-stream
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev glslang-dev glslang-tools libgomp1
+
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install vulkan-sdk -y --no-progress
+          $sdk = Get-ChildItem C:\VulkanSDK -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $sdk) { throw "Vulkan SDK not found under C:\VulkanSDK" }
+          "VULKAN_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-ChildItem "$($sdk.FullName)\Lib\vulkan-1.lib", "$($sdk.FullName)\Include\vulkan\vulkan.h"
+
+      - name: Install MoltenVK (macOS)
+        if: runner.os == 'macOS'
+        run: brew install molten-vk libomp
+
+      - name: Download prebuilt ncnn release
+        shell: bash
+        run: |
+          curl -L -o ncnn.zip ${{ matrix.ncnn_url }}
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            mkdir -p ncnn-frameworks
+            unzip -q ncnn.zip -d ncnn-frameworks
+            ls -la ncnn-frameworks
+            ls ncnn-frameworks/ncnn.framework/Headers | head -20
+            lipo -info ncnn-frameworks/ncnn.framework/ncnn || true
+            lipo -info ncnn-frameworks/glslang.framework/glslang || true
+            lipo -info ncnn-frameworks/openmp.framework/openmp || true
+          else
+            unzip -q ncnn.zip
+            ls -la ${{ matrix.ncnn_dir }}
+          fi
+
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem "${{ github.workspace }}/${{ matrix.ncnn_dir }}/x64/lib/cmake" -Directory | Select-Object -ExpandProperty Name
+          cmake -B build -S engine/rife-stream/src -A x64 -DVulkan_INCLUDE_DIR="$env:VULKAN_SDK/Include" -DVulkan_LIBRARY="$env:VULKAN_SDK/Lib/vulkan-1.lib" -DUSE_SYSTEM_NCNN=ON -Dncnn_DIR="${{ github.workspace }}/${{ matrix.ncnn_dir }}/x64/lib/cmake/ncnn" -Dglslang_DIR="${{ github.workspace }}/${{ matrix.ncnn_dir }}/x64/lib/cmake/glslang"
+
+      - name: Configure CMake (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build -S engine/rife-stream/src -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_NCNN=ON -Dncnn_DIR="${{ github.workspace }}/${{ matrix.ncnn_dir }}/lib/cmake/ncnn" -Dglslang_DIR="${{ github.workspace }}/${{ matrix.ncnn_dir }}/lib/cmake/glslang"
+
+      - name: Configure CMake (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # both macOS jobs run on the arm64 runner; x86_64 is cross-compiled
+          VK_INC="/opt/homebrew/include"
+          VK_LIB="/opt/homebrew/lib/libMoltenVK.dylib"
+          lipo -info "$VK_LIB" || true
+          cmake -B build -S engine/rife-stream/src -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="${{ matrix.arch }}" -DUSE_SYSTEM_NCNN=ON -DNCNN_FRAMEWORK_DIR="${{ github.workspace }}/ncnn-frameworks" -DVulkan_INCLUDE_DIR="$VK_INC" -DVulkan_LIBRARY="$VK_LIB"
+
+      - name: Build RIFE stream binary
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cmake --build build --config Release -j 2 --target rife-ncnn-vulkan-stream
+          else
+            cmake --build build -j 2 --target rife-ncnn-vulkan-stream
+            strip ${{ matrix.binary }} || true
+          fi
+
+      - name: Upload rife-stream artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rife-stream-${{ matrix.os_name }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error

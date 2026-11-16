@@ -216,9 +216,136 @@ pub fn chunk_size(width: u32, height: u32, p: u64, q: u64) -> usize {
     chunk_size_with_disk(width, height, p, q, None)
 }
 
+pub fn build_frame_times(count: usize, total: usize, cuts: &HashSet<usize>) -> Vec<f32> {
+    let mut times = Vec::with_capacity(total);
+    for i in 0..total {
+        let m = rife_map(i, count, total);
+        if m.t > 0.0 && m.t < 1.0 && cuts.contains(&(m.sx + 1)) {
+            let src = if m.t < 0.5 { m.sx } else { m.sx + 1 };
+            times.push(src as f32);
+        } else {
+            times.push((m.sx as f32) + m.t);
+        }
+    }
+    times
+}
+
+pub fn serialize_frame_times(times: &[f32]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(times.len() * 4);
+    for &t in times {
+        buf.extend_from_slice(&t.to_le_bytes());
+    }
+    buf
+}
+
+pub fn deserialize_frame_times(bytes: &[u8]) -> Result<Vec<f32>, String> {
+    if !bytes.len().is_multiple_of(4) {
+        return Err(format!(
+            "Invalid frame-time buffer length: {} (not a multiple of 4)",
+            bytes.len()
+        ));
+    }
+    let count = bytes.len() / 4;
+    let mut times = Vec::with_capacity(count);
+    for i in 0..count {
+        let chunk: [u8; 4] = bytes[i * 4..(i + 1) * 4]
+            .try_into()
+            .map_err(|e| format!("Failed to read float bytes: {}", e))?;
+        times.push(f32::from_le_bytes(chunk));
+    }
+    Ok(times)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_frame_time_list_format() {
+        let mut cuts = HashSet::new();
+        // 5 input frames -> 10 output frames (2x interpolation)
+        let times_no_cut = build_frame_times(5, 10, &cuts);
+        assert_eq!(times_no_cut.len(), 10);
+        // Verify 2x multiplier values
+        assert_eq!(times_no_cut[0], 0.0);
+        assert_eq!(times_no_cut[1], 0.5);
+        assert_eq!(times_no_cut[2], 1.0);
+        assert_eq!(times_no_cut[3], 1.5);
+        assert_eq!(times_no_cut[4], 2.0);
+
+        // Add a cut at frame 2 (1-based index)
+        cuts.insert(2);
+        let times_with_cut = build_frame_times(5, 10, &cuts);
+        assert_eq!(times_with_cut.len(), 10);
+        // Frame at index 3 (originally sx=1, t=0.5 between frame 1 and 2)
+        // With cut at 2 and t=0.5 (t >= 0.5), it should replace with src frame 2
+        assert_eq!(times_with_cut[3], 2.0);
+        // Pass-through frames remain untouched
+        assert_eq!(times_with_cut[0], 0.0);
+        assert_eq!(times_with_cut[2], 1.0);
+
+        // Serialization and deserialization round trip
+        let bytes = serialize_frame_times(&times_with_cut);
+        assert_eq!(bytes.len(), 10 * 4);
+        let roundtrip = deserialize_frame_times(&bytes).expect("deserialize failed");
+        assert_eq!(roundtrip, times_with_cut);
+
+        // Invalid byte length check
+        assert!(deserialize_frame_times(&[0u8; 7]).is_err());
+    }
+
+    #[test]
+    fn test_stream_frame_time_cut_handling() {
+        let mut cuts = HashSet::new();
+        // Cut at frame index 2 (1-based, meaning between frame 1 and frame 2 in 0-based indices)
+        cuts.insert(2);
+
+        // Test 2x interpolation: 5 input frames -> 10 output frames
+        let times_2x = build_frame_times(5, 10, &cuts);
+        assert_eq!(times_2x.len(), 10);
+        // Source frame 0 pass-through
+        assert_eq!(times_2x[0], 0.0);
+        // Interpolated between frame 0 and frame 1 (no cut)
+        assert_eq!(times_2x[1], 0.5);
+        // Source frame 1 pass-through
+        assert_eq!(times_2x[2], 1.0);
+        // Interpolated between frame 1 and frame 2 (cut at 2).
+        // Since t=0.5 >= 0.5, replaced with source frame 2 (2.0)
+        assert_eq!(times_2x[3], 2.0);
+        // Source frame 2 pass-through
+        assert_eq!(times_2x[4], 2.0);
+        // Interpolated between frame 2 and frame 3 (no cut)
+        assert_eq!(times_2x[5], 2.5);
+
+        // Test 4x interpolation: 5 input frames -> 20 output frames
+        let times_4x = build_frame_times(5, 20, &cuts);
+        assert_eq!(times_4x.len(), 20);
+        // Before cut: frame 0 -> 1 smooth interpolation
+        assert_eq!(times_4x[0], 0.0);
+        assert_eq!(times_4x[1], 0.25);
+        assert_eq!(times_4x[2], 0.50);
+        assert_eq!(times_4x[3], 0.75);
+        // Pass-through frame 1
+        assert_eq!(times_4x[4], 1.0);
+        // Across cut boundary between frame 1 and frame 2:
+        // t = 0.25 < 0.5 -> snaps to frame 1 (1.0)
+        assert_eq!(times_4x[5], 1.0);
+        // t = 0.50 >= 0.5 -> snaps to frame 2 (2.0)
+        assert_eq!(times_4x[6], 2.0);
+        // t = 0.75 >= 0.5 -> snaps to frame 2 (2.0)
+        assert_eq!(times_4x[7], 2.0);
+        // Pass-through frame 2
+        assert_eq!(times_4x[8], 2.0);
+        // After cut: frame 2 -> 3 smooth interpolation resumes
+        assert_eq!(times_4x[9], 2.25);
+        assert_eq!(times_4x[10], 2.50);
+        assert_eq!(times_4x[11], 2.75);
+
+        // Verify roundtrip serialization of times with cuts
+        let serialized = serialize_frame_times(&times_4x);
+        let deserialized = deserialize_frame_times(&serialized).expect("deserialize failed");
+        assert_eq!(deserialized, times_4x);
+    }
 
     #[test]
     fn test_rife_threads_tuning() {
