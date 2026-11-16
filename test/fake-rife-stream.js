@@ -26,7 +26,9 @@ if (!timesPath || !width || !height) {
   process.exit(1);
 }
 
-if (process.env.FAKE_RIFE_FAIL && !process.argv.includes('-1')) {
+// Failure is requested by argument only, never by a process-global env var,
+// because cargo runs tests in parallel threads of one process.
+if (process.argv.includes('--fake-fail')) {
   console.error('vkQueueSubmit failed');
   process.exit(255);
 }

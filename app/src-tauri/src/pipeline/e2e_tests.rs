@@ -1536,12 +1536,15 @@ async fn test_e2e_stream_fallback_on_failure() {
         .await
         .expect("probe failed");
 
-    // Enable FAKE_RIFE_FAIL
-    std::env::set_var("FAKE_RIFE_FAIL", "1");
-
+    // Make only the stream engine fail, via an argument. A process-global env var
+    // would leak into other tests running in parallel.
     let mut cfg_stream = make_test_cfg(&work, &fake_rife);
     cfg_stream.engine_mode = Some("stream".into());
-    cfg_stream.rife_stream_cmd = Some(vec!["node".into(), fake_stream.to_string_lossy().to_string()]);
+    cfg_stream.rife_stream_cmd = Some(vec![
+        "node".into(),
+        fake_stream.to_string_lossy().to_string(),
+        "--fake-fail".into(),
+    ]);
     let out_stream = work.join("out_fallback.mp4");
 
     let req_stream = JobRequest {
@@ -1566,7 +1569,6 @@ async fn test_e2e_stream_fallback_on_failure() {
     };
 
     let res = run_pipeline(cfg_stream, req_stream, |_| {}, Arc::new(AtomicBool::new(false))).await;
-    std::env::remove_var("FAKE_RIFE_FAIL");
 
     assert!(res.ok, "Pipeline should succeed via fallback: {:?}", res.error);
     assert!(out_stream.exists(), "Output file must exist after fallback");
