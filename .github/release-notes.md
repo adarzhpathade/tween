@@ -9,7 +9,7 @@
 
 ## Supported systems
 
-- **Windows 10/11 (x64):** NSIS setup installer (`.exe`).
+- **Windows 10/11 (x64):** NSIS setup installer (`.exe`). Streaming mode requires the [Microsoft Visual C++ 2015–2022 x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (dynamic MSVC runtime: `VCRUNTIME140`, `VCRUNTIME140_1`, `MSVCP140`, `VCOMP140`); file mode works without it if the engine does not need it.
 - **macOS on Apple Silicon only (arm64):** Disk image (`.dmg`). *Note: Intel Macs (x86_64) are not supported.*
 - **Linux (x64, glibc):** `AppImage` and Debian package (`.deb`).
 
@@ -20,6 +20,7 @@
 These builds are not code-signed yet, so your operating system will show a security warning on first launch:
 
 - **Windows:** When SmartScreen appears, click **More info** and then click **Run anyway**.
+  - *Streaming mode requirement:* The Windows stream engine (`rife-ncnn-vulkan-stream.exe`) is built with the dynamic MSVC runtime and requires the [Microsoft Visual C++ 2015–2022 x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) on your PC (`VCRUNTIME140`, `VCRUNTIME140_1`, `MSVCP140`, `VCOMP140`). File mode works without it if the engine does not need it.
 - **macOS (Apple Silicon only):** Right-click `Tween.app` in `/Applications` (or Finder) and select **Open**, or run in Terminal:
   ```bash
   xattr -dr com.apple.quarantine /Applications/Tween.app
@@ -55,5 +56,6 @@ Windows 11 laptop, NVIDIA GeForce RTX 4050 Laptop GPU (6 GB), Intel UHD Graphics
 ## Known limits
 
 - **Vulkan GPU recommended:** RIFE requires a Vulkan-compatible GPU for acceptable performance. Without a working Vulkan device, Tween runs on the CPU (much slower).
+- **Windows VC++ Runtime:** The Windows stream engine (`rife-ncnn-vulkan-stream.exe`) is built with the dynamic MSVC runtime. Streaming mode requires the [Microsoft Visual C++ 2015–2022 x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (`VCRUNTIME140`, `VCRUNTIME140_1`, `MSVCP140`, `VCOMP140`) on the user's PC; file mode works without it if the engine does not need it.
 - **macOS hardware:** macOS is supported on Apple Silicon only (M1/M2/M3/M4); Intel Macs are not supported.
 - **Hardware encoding:** Supported with NVENC, AMD AMF, Intel Quick Sync, and Apple VideoToolbox. CPU fallback encoding (x264/x265) is used when hardware encoders are unavailable.
