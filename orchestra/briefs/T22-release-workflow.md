@@ -24,3 +24,7 @@ App source, `app/src-tauri/icons`. No secrets: no signing keys are used.
 ## Supported systems (user decision)
 
 Intel Macs (x86_64) are not supported. Update the README supported-systems text to say "macOS on Apple Silicon only" and mention it in the release notes template.
+
+## Windows runtime note (added by orchestrator)
+
+The Windows stream engine (`rife-ncnn-vulkan-stream.exe`) is built with the dynamic MSVC runtime. It needs the Microsoft Visual C++ 2015-2022 x64 Redistributable on the user's PC (VCRUNTIME140, VCRUNTIME140_1, MSVCP140, VCOMP140). Say this in `.github/release-notes.md` with the download link `https://aka.ms/vs/17/release/vc_redist.x64.exe`, and say that file mode works without it only if the engine does not need it. If it is simple, also make the NSIS installer include the redistributable's DLLs instead; otherwise the note is enough.
