@@ -246,4 +246,7 @@ pub struct JobFinished {
     pub peak_temp_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage_times: Option<StageTimes>,
+    /// Why a requested stream run used file mode instead (self-test or run failure).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine_fallback_reason: Option<String>,
 }

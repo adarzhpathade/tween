@@ -576,14 +576,34 @@ where
     }
 }
 
-static STREAM_SELF_TEST_CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+/// Drains a child's stderr in the background (so a full pipe can never stall it) and
+/// returns the last few lines when the child is done.
+fn spawn_stderr_tail(pipe: Option<tokio::process::ChildStderr>) -> tokio::task::JoinHandle<String> {
+    tokio::spawn(async move {
+        let mut buf = Vec::new();
+        if let Some(mut p) = pipe {
+            let _ = p.read_to_end(&mut buf).await;
+        }
+        let text = String::from_utf8_lossy(&buf).to_string();
+        let lines: Vec<&str> = text.lines().rev().take(8).collect();
+        lines.into_iter().rev().collect::<Vec<_>>().join(" | ")
+    })
+}
+
+static STREAM_SELF_TEST_CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Result<(), String>>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 pub async fn check_stream_engine_supported(cfg: &PipelineConfig) -> bool {
+    stream_engine_status(cfg).await.is_ok()
+}
+
+/// Runs (once per configuration) the stream engine self-test. `Err` carries the reason
+/// the stream engine cannot be used (missing binary, exit code and stderr, mismatch).
+pub async fn stream_engine_status(cfg: &PipelineConfig) -> Result<(), String> {
     let cache_key = format!("{:?}_{:?}", cfg.rife_dir, cfg.rife_stream_cmd);
     if let Ok(lock) = STREAM_SELF_TEST_CACHE.lock() {
-        if let Some(&res) = lock.get(&cache_key) {
-            return res;
+        if let Some(res) = lock.get(&cache_key) {
+            return res.clone();
         }
     }
 
@@ -594,37 +614,44 @@ pub async fn check_stream_engine_supported(cfg: &PipelineConfig) -> bool {
         stream_exe.exists()
     };
 
-    if !has_stream {
-        eprintln!(
-            "[runner] Streaming RIFE engine binary not found at {:?}; using file mode",
+    let result = if !has_stream {
+        let msg = format!(
+            "Streaming RIFE engine binary not found at {:?}",
             rife_stream_exe(Path::new(&cfg.rife_dir))
         );
-        if let Ok(mut lock) = STREAM_SELF_TEST_CACHE.lock() {
-            lock.insert(cache_key, false);
+        eprintln!("[runner] {}; using file mode", msg);
+        Err(msg)
+    } else {
+        let mut why = String::new();
+        if run_stream_self_test_internal(cfg, &mut why).await {
+            Ok(())
+        } else {
+            if why.is_empty() {
+                why = "stream self-test failed".into();
+            }
+            eprintln!("[runner] Stream engine self-test failed: {}", why);
+            Err(why)
         }
-        return false;
-    }
-
-    let passed = run_stream_self_test_internal(cfg).await;
+    };
     if let Ok(mut lock) = STREAM_SELF_TEST_CACHE.lock() {
-        lock.insert(cache_key, passed);
+        lock.insert(cache_key, result.clone());
     }
-    passed
+    result
 }
 
-async fn run_stream_self_test_internal(cfg: &PipelineConfig) -> bool {
+async fn run_stream_self_test_internal(cfg: &PipelineConfig, why: &mut String) -> bool {
     let tmp = std::env::temp_dir().join(format!("tween-stream-selftest-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     if std::fs::create_dir_all(&tmp).is_err() {
         return false;
     }
 
-    let res = run_stream_self_test_work(cfg, &tmp).await;
+    let res = run_stream_self_test_work(cfg, &tmp, why).await;
     let _ = std::fs::remove_dir_all(&tmp);
     res
 }
 
-async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
+async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path, why: &mut String) -> bool {
     let w = 64usize;
     let h = 64usize;
     let frame_bytes = w * h * 3;
@@ -661,6 +688,11 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
         (rife_stream_exe(&rife_dir_path).to_string_lossy().to_string(), Vec::new())
     };
 
+    let self_test_gpu = match (&cfg.mode[..], &cfg.gpu) {
+        ("gpu", Some(g)) => g.id.to_string(),
+        _ => "-1".to_string(),
+    };
+
     let mut stream_cmd = tokio::process::Command::new(&stream_bin);
     stream_cmd.args(&stream_pre);
     stream_cmd.args([
@@ -673,7 +705,7 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
         "-m",
         model_path.to_str().unwrap(),
         "-g",
-        "0",
+        &self_test_gpu,
         "-j",
         "1:1:1",
     ]);
@@ -682,7 +714,7 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
     }
     stream_cmd.stdin(std::process::Stdio::piped());
     stream_cmd.stdout(std::process::Stdio::piped());
-    stream_cmd.stderr(std::process::Stdio::null());
+    stream_cmd.stderr(std::process::Stdio::piped());
 
     #[cfg(target_os = "windows")]
     {
@@ -692,8 +724,19 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
 
     let mut stream_child = match stream_cmd.spawn() {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(e) => {
+            *why = format!("could not start {:?}: {}", stream_bin, e);
+            return false;
+        }
     };
+    let mut stream_stderr_pipe = stream_child.stderr.take();
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        if let Some(mut e) = stream_stderr_pipe.take() {
+            let _ = e.read_to_end(&mut buf).await;
+        }
+        String::from_utf8_lossy(&buf).to_string()
+    });
 
     if let Some(mut stdin) = stream_child.stdin.take() {
         let input_copy = input_bytes.clone();
@@ -705,16 +748,32 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
 
     let mut stream_out_bytes = Vec::new();
     if let Some(mut stdout) = stream_child.stdout.take() {
-        if stdout.read_to_end(&mut stream_out_bytes).await.is_err() {
+        if let Err(e) = stdout.read_to_end(&mut stream_out_bytes).await {
+            *why = format!("reading stream engine output failed: {}", e);
             return false;
         }
     }
 
     let stream_status = match stream_child.wait().await {
         Ok(s) => s,
-        Err(_) => return false,
+        Err(e) => {
+            *why = format!("waiting for stream engine failed: {}", e);
+            return false;
+        }
     };
+    let stream_stderr = stderr_task.await.unwrap_or_default();
     if !stream_status.success() || stream_out_bytes.len() != 10 * frame_bytes {
+        let tail: String = {
+            let lines: Vec<&str> = stream_stderr.lines().rev().take(8).collect();
+            lines.into_iter().rev().collect::<Vec<_>>().join(" | ")
+        };
+        *why = format!(
+            "stream engine exited with {} after {} of {} output bytes; stderr: {}",
+            stream_status,
+            stream_out_bytes.len(),
+            10 * frame_bytes,
+            if tail.is_empty() { "(empty)".to_string() } else { tail }
+        );
         return false;
     }
 
@@ -761,6 +820,7 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
         Err(_) => return false,
     };
     if !png_status.success() {
+        *why = "self-test: ffmpeg could not write the input PNG frames".into();
         return false;
     }
 
@@ -786,7 +846,7 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
         "-n",
         "10",
         "-g",
-        "0",
+        &self_test_gpu,
         "-j",
         "1:1:1",
     ]);
@@ -808,6 +868,7 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
         Err(_) => return false,
     };
     if !f_status.success() {
+        *why = format!("self-test: the file-mode RIFE reference run failed ({})", f_status);
         return false;
     }
 
@@ -844,6 +905,11 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
         Err(_) => return false,
     };
     if !r_status.success() || file_out_bytes.len() != 10 * frame_bytes {
+        *why = format!(
+            "self-test: file-mode reference gave {} bytes, expected {}",
+            file_out_bytes.len(),
+            10 * frame_bytes
+        );
         return false;
     }
 
@@ -853,11 +919,13 @@ async fn run_stream_self_test_work(cfg: &PipelineConfig, tmp: &Path) -> bool {
 
         if i % 2 == 0 {
             if stream_frame != file_frame {
+                *why = format!("self-test: pass-through frame {} differs from file mode", i);
                 return false;
             }
         } else {
             let ssim = calculate_ssim(stream_frame, file_frame, w, h);
             if ssim < 0.995 {
+                *why = format!("self-test: interpolated frame {} SSIM {:.4} vs file mode is below 0.995", i, ssim);
                 return false;
             }
         }
@@ -1087,6 +1155,7 @@ where
     let dec_pid = dec_child.id().unwrap_or(0);
     procs.add(dec_pid).await;
     let mut dec_stdout = dec_child.stdout.take().ok_or("Failed to open decoder stdout")?;
+    let dec_err_task = spawn_stderr_tail(dec_child.stderr.take());
 
     let gpu = match (&cfg.mode[..], &cfg.gpu) {
         ("gpu", Some(g)) => g.id.to_string(),
@@ -1155,6 +1224,7 @@ where
     procs.add(rife_pid).await;
     let mut rife_stdin = rife_child.stdin.take().ok_or("Failed to open RIFE stdin")?;
     let mut rife_stdout = rife_child.stdout.take().ok_or("Failed to open RIFE stdout")?;
+    let rife_err_task = spawn_stderr_tail(rife_child.stderr.take());
 
     let is_mp4_mov = {
         let lower = job.output.to_lowercase();
@@ -1263,6 +1333,7 @@ where
     let enc_pid = enc_child.id().unwrap_or(0);
     procs.add(enc_pid).await;
     let mut enc_stdin = enc_child.stdin.take().ok_or("Failed to open encoder stdin")?;
+    let enc_err_task = spawn_stderr_tail(enc_child.stderr.take());
 
     emit(JobProgressEvent {
         stage: "interpolate".into(),
@@ -1367,23 +1438,34 @@ where
         return Err("cancelled".into());
     }
 
-    pipe_dec_res?;
-    let encoded = pipe_enc_res?;
+    let dec_tail = dec_err_task.await.unwrap_or_default();
+    let rife_tail = rife_err_task.await.unwrap_or_default();
+    let enc_tail = enc_err_task.await.unwrap_or_default();
 
-    let dec_status = dec_res.map_err(|e| format!("Decoder wait error: {}", e))?;
-    if !dec_status.success() {
-        return Err(format!("Decoder process failed with exit {}", dec_status));
+    // Report the real cause first: a failed engine or encoder also breaks the pipes,
+    // which would otherwise surface only as a "Broken pipe" write error.
+    if let Ok(st) = &rife_res {
+        if !st.success() {
+            return Err(format!("RIFE stream process failed with exit {}; stderr: {}", st, rife_tail));
+        }
+    }
+    if let Ok(st) = &dec_res {
+        if !st.success() {
+            return Err(format!("Decoder process failed with exit {}; stderr: {}", st, dec_tail));
+        }
+    }
+    if let Ok(st) = &enc_res {
+        if !st.success() {
+            return Err(format!("Encoder process failed with exit {}; stderr: {}", st, enc_tail));
+        }
     }
 
-    let rife_status = rife_res.map_err(|e| format!("RIFE wait error: {}", e))?;
-    if !rife_status.success() {
-        return Err(format!("RIFE stream process failed with exit {}", rife_status));
-    }
+    pipe_dec_res.map_err(|e| format!("{} (rife stderr: {})", e, rife_tail))?;
+    let encoded = pipe_enc_res.map_err(|e| format!("{} (rife stderr: {})", e, rife_tail))?;
 
-    let enc_status = enc_res.map_err(|e| format!("Encoder wait error: {}", e))?;
-    if !enc_status.success() {
-        return Err(format!("Encoder process failed with exit {}", enc_status));
-    }
+    dec_res.map_err(|e| format!("Decoder wait error: {}", e))?;
+    rife_res.map_err(|e| format!("RIFE wait error: {}", e))?;
+    enc_res.map_err(|e| format!("Encoder wait error: {}", e))?;
 
     let out_size = std::fs::metadata(&job.output).map(|m| m.len()).unwrap_or(0);
     let seconds = t0.elapsed().as_secs_f64();
@@ -1417,6 +1499,7 @@ where
             rife_ms: interp_ms,
             encode_ms: interp_ms,
         }),
+        engine_fallback_reason: None,
     })
 }
 
@@ -1438,12 +1521,15 @@ where
         .or(cfg.engine_mode.as_deref())
         .unwrap_or("file");
 
+    let mut stream_fallback_reason: Option<String> = None;
     if requested_mode == "stream" || requested_mode == "auto" {
-        if check_stream_engine_supported(cfg).await {
+        let stream_status = stream_engine_status(cfg).await;
+        if stream_status.is_ok() {
             match run_stream_pipeline(cfg, job, tmp, emit.clone(), cancel.clone(), procs.clone(), t0).await {
                 Ok(finished) => return Ok(finished),
                 Err(_e) => {
                     eprintln!("[runner] Stream engine failed ({}); falling back to file mode", _e);
+                    stream_fallback_reason = Some(format!("stream run failed: {}", _e));
                     let _ = std::fs::remove_file(&job.output);
                     emit(JobProgressEvent {
                         stage: "interpolate".into(),
@@ -1457,8 +1543,14 @@ where
                     });
                 }
             }
-        } else if requested_mode == "stream" {
-            eprintln!("[runner] Streaming RIFE engine not available (binary missing or self-test failed); running in file mode");
+        } else {
+            stream_fallback_reason = stream_status.err();
+            if requested_mode == "stream" {
+                eprintln!(
+                    "[runner] Streaming RIFE engine not available ({}); running in file mode",
+                    stream_fallback_reason.as_deref().unwrap_or("unknown")
+                );
+            }
         }
     }
     let info = &job.info;
@@ -2261,6 +2353,7 @@ where
             rife_ms: rife_total_ms as u64,
             encode_ms: encode_elapsed_ms,
         }),
+        engine_fallback_reason: stream_fallback_reason,
     };
 
     emit(JobProgressEvent {

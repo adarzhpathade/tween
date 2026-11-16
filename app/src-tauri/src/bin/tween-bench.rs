@@ -227,7 +227,7 @@ fn pick_encoder(cfg: &PipelineConfig) -> String {
 
 #[tokio::main]
 async fn main() {
-    let (mut cfg, gpu_name, mut engine_mode) = match locate_setup_config() {
+    let (mut cfg, gpu_name, _configured_mode) = match locate_setup_config() {
         Some(c) => c,
         None => {
             eprintln!("no GPU engine installed");
@@ -240,23 +240,11 @@ async fn main() {
     while i < args.len() {
         if args[i] == "--engine-mode" && i + 1 < args.len() {
             let m = args[i + 1].to_lowercase();
-            cfg.engine_mode = Some(m.clone());
-            engine_mode = match m.as_str() {
-                "stream" => "Stream".to_string(),
-                "file" => "File".to_string(),
-                "auto" => "Auto".to_string(),
-                _ => m,
-            };
+            cfg.engine_mode = Some(m);
             i += 2;
         } else if let Some(stripped) = args[i].strip_prefix("--engine-mode=") {
             let m = stripped.to_lowercase();
-            cfg.engine_mode = Some(m.clone());
-            engine_mode = match m.as_str() {
-                "stream" => "Stream".to_string(),
-                "file" => "File".to_string(),
-                "auto" => "Auto".to_string(),
-                _ => m,
-            };
+            cfg.engine_mode = Some(m);
             i += 1;
         } else {
             i += 1;
@@ -385,6 +373,27 @@ async fn main() {
         let _ = std::fs::remove_dir_all(&bench_work);
         std::process::exit(1);
     }
+
+    // Label the result with the engine that actually ran, not the one requested.
+    let used_mode = res.engine_mode.clone().unwrap_or_else(|| "file".to_string());
+    let requested_stream = cfg.engine_mode.as_deref() == Some("stream");
+    if requested_stream && !used_mode.eq_ignore_ascii_case("stream") {
+        eprintln!(
+            "Benchmark invalid: stream mode was requested but the pipeline used {} mode.",
+            used_mode
+        );
+        eprintln!(
+            "Reason: {}",
+            res.engine_fallback_reason.as_deref().unwrap_or("not recorded")
+        );
+        let _ = std::fs::remove_dir_all(&bench_work);
+        std::process::exit(1);
+    }
+    let engine_mode = if used_mode.eq_ignore_ascii_case("stream") {
+        "Stream".to_string()
+    } else {
+        "File".to_string()
+    };
 
     let total_seconds = match res.seconds {
         Some(s) if s > 0.0 => s,
