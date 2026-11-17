@@ -974,12 +974,11 @@
     },
     {
       "id": "T24",
-      "title": "Setup downloads the stream engine (hold until released)",
+      "title": "Setup downloads the stream engine",
       "brief": "briefs/T24-setup-stream-download.md",
       "deps": [
         "T20",
-        "T22",
-        "HOLD-until-released"
+        "T22"
       ],
       "checks": [
         [

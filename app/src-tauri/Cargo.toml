@@ -28,6 +28,7 @@ base64 = "0.22"
 rfd = { version = "0.17", default-features = false }
 sysinfo = "0.40"
 dirs = "7"
+sha2 = "0.11.1"
 
 [profile.release]
 codegen-units = 1

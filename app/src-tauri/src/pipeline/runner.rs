@@ -1529,7 +1529,7 @@ where
         .engine_mode
         .as_deref()
         .or(cfg.engine_mode.as_deref())
-        .unwrap_or("file");
+        .unwrap_or("auto");
 
     let mut stream_fallback_reason: Option<String> = None;
     if requested_mode == "stream" || requested_mode == "auto" {

@@ -929,6 +929,107 @@ where
     Ok(())
 }
 
+/// GitHub repository that publishes the app releases (and the stream engine assets).
+pub const RELEASE_REPO: &str = "adarzhpathade/tween";
+/// Name of the checksums file attached to every release.
+pub const STREAM_SUMS_ASSET: &str = "SHA256SUMS";
+
+/// Release asset name of the stream engine for the given OS and arch, if one is published.
+pub fn stream_asset_name_for(platform: &str, arch: &str) -> Option<&'static str> {
+    match (platform, arch) {
+        ("win32", "x64") => Some("rife-ncnn-vulkan-stream-windows-x64.exe"),
+        ("linux", "x64") => Some("rife-ncnn-vulkan-stream-linux-x64"),
+        ("darwin", "arm64") => Some("rife-ncnn-vulkan-stream-macos-arm64"),
+        _ => None,
+    }
+}
+
+/// Download URL of a release asset for the release matching this app version.
+pub fn release_asset_url(version: &str, asset: &str) -> String {
+    format!("https://github.com/{RELEASE_REPO}/releases/download/v{version}/{asset}")
+}
+
+/// Finds the SHA-256 for `asset` in a `sha256sum`-style file (`<hex>  <name>`).
+pub fn parse_sha256sums(text: &str, asset: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let mut it = line.split_whitespace();
+        let hash = it.next()?;
+        let name = it.next()?.trim_start_matches('*');
+        if name == asset && hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            Some(hash.to_ascii_lowercase())
+        } else {
+            None
+        }
+    })
+}
+
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+async fn http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {} for {url}", resp.status()));
+    }
+    resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+}
+
+/// Downloads the stream engine from the release matching `version`, verifies its SHA-256
+/// against the release's SHA256SUMS and installs it in `rife_dir`. Any failure is an `Err`
+/// that callers log; file mode keeps working without the stream binary.
+pub async fn install_stream_engine_from(
+    rife_dir: &Path,
+    platform: &str,
+    arch: &str,
+    version: &str,
+) -> Result<(), String> {
+    let asset = stream_asset_name_for(platform, arch)
+        .ok_or_else(|| format!("no stream engine published for {platform}-{arch}"))?;
+    let sums = http_get_bytes(&release_asset_url(version, STREAM_SUMS_ASSET)).await?;
+    let want = parse_sha256sums(&String::from_utf8_lossy(&sums), asset)
+        .ok_or_else(|| format!("{asset} not listed in {STREAM_SUMS_ASSET}"))?;
+    let bytes = http_get_bytes(&release_asset_url(version, asset)).await?;
+    let got = sha256_hex(&bytes);
+    if got != want {
+        return Err(format!("{asset} checksum mismatch (expected {want}, got {got})"));
+    }
+    std::fs::create_dir_all(rife_dir).map_err(|e| e.to_string())?;
+    let dest = crate::pipeline::models::rife_stream_exe(rife_dir);
+    let part = dest.with_extension("part");
+    std::fs::write(&part, &bytes).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755));
+    }
+    std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        let _ = tokio::process::Command::new("xattr")
+            .args(["-dr", "com.apple.quarantine", dest.to_str().unwrap_or(".")])
+            .output()
+            .await;
+    }
+    Ok(())
+}
+
+/// Best effort: installs the stream engine if missing. Never fails setup.
+pub async fn install_stream_engine(rife_dir: &Path) {
+    if crate::pipeline::models::rife_stream_exe(rife_dir).exists() {
+        return;
+    }
+    match install_stream_engine_from(rife_dir, PLATFORM, ARCH, env!("CARGO_PKG_VERSION")).await {
+        Ok(()) => eprintln!("[setup] stream engine installed"),
+        Err(e) => eprintln!("[setup] stream engine not installed ({e}); using file mode"),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FfmpegInfo {
     pub ffmpeg: String,
@@ -1580,6 +1681,8 @@ where
         return SetupResult { ok: false, cfg };
     }
 
+    install_stream_engine(&dir).await;
+
     cfg.rife_dir = Some(dir.to_string_lossy().to_string());
     cfg.models = Some(models.iter().map(|m| m.id.to_string()).collect());
     emit(ProgressEvent {
@@ -1837,6 +1940,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn test_stream_asset_selection_and_sums() {
+        assert_eq!(stream_asset_name_for("win32", "x64"), Some("rife-ncnn-vulkan-stream-windows-x64.exe"));
+        assert_eq!(stream_asset_name_for("linux", "x64"), Some("rife-ncnn-vulkan-stream-linux-x64"));
+        assert_eq!(stream_asset_name_for("darwin", "arm64"), Some("rife-ncnn-vulkan-stream-macos-arm64"));
+        assert_eq!(stream_asset_name_for("darwin", "x64"), None);
+        assert_eq!(
+            release_asset_url("0.1.0", "SHA256SUMS"),
+            "https://github.com/adarzhpathade/tween/releases/download/v0.1.0/SHA256SUMS"
+        );
+        let h = "a".repeat(64);
+        let text = format!("{h}  other\n{}  rife-ncnn-vulkan-stream-linux-x64\n", "B".repeat(64));
+        assert_eq!(parse_sha256sums(&text, "rife-ncnn-vulkan-stream-linux-x64"), Some("b".repeat(64)));
+        assert_eq!(parse_sha256sums(&text, "missing"), None);
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stream_install_failure_is_not_fatal() {
+        let tmp = test_temp_dir("stream-missing");
+        // a release that does not exist: must be an Err, and leave no binary behind
+        let r = install_stream_engine_from(&tmp, PLATFORM, ARCH, "0.0.0-nonexistent").await;
+        assert!(r.is_err());
+        assert!(!crate::pipeline::models::rife_stream_exe(&tmp).exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs a published release with stream assets"]
+    async fn test_real_stream_download() {
+        let tmp = test_temp_dir("real-stream");
+        install_stream_engine_from(&tmp, PLATFORM, ARCH, env!("CARGO_PKG_VERSION"))
+            .await
+            .expect("stream engine download should succeed");
+        assert!(crate::pipeline::models::rife_stream_exe(&tmp).exists());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

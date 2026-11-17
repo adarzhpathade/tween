@@ -63,7 +63,15 @@ All numbers below are **measured**, not estimated. Each row says which version a
 | 0.1.0 reference pipeline | File (PNG on disk) | Fast, 2× | **18.0** | ~27 min |
 | 0.1.0 reference pipeline | File (PNG on disk) | Detail, 2× | **14.6** | ~33 min |
 | Speed update 1 (quick wins, Rust pipeline) | File, tuned | Smooth, 2× | **17.7** | ~27 min |
-| Speed update 2 (streaming engine) | Stream (no disk) | Smooth, 2× | *pending* | *pending* |
+| 1d51c55 | File | 1080p 24->48 Smooth | **19.9** | ~24 min |
+| 1d51c55 | File | 1080p 24->48 Smooth | **20.1** | ~24 min |
+| 1d51c55 | Stream | 1080p 24->48 Smooth | **21.2** | ~23 min |
+| 1d51c55 | File | 1080p 24->48 Smooth, 60 s | **23.0** | ~21 min |
+| 1d51c55 | Stream | 1080p 24->48 Smooth, 60 s | **23.8** | ~20 min |
+
+The `1d51c55` rows come from the Rust pipeline benchmark (`tween-bench`) on test machine A, run on a quiet machine. The two File rows on the 8 s clip are two separate runs. Temp disk: file mode used 2.66 GB on the 8 s clip and 4496 MB on the 60 s clip; stream mode used 0 MB. On the 60 s clip, file mode took 125.4 s and stream mode 120.8 s. Stream is faster, so it is now the default (automatic mode: stream when the stream engine is installed and passes its self-test, otherwise file mode).
+
+The stream engine self-test takes about 2 s (1993 ms and 2007 ms measured). It runs once per session and is not included in the figures above.
 
 **GPU self-test on the same machine** (onboarding runs a short interpolation on each GPU and picks the fastest): RTX 4050 Laptop **1.6 s**, Intel UHD 770 **4.9 s**. Tween chose the RTX.
 
@@ -72,7 +80,7 @@ All numbers below are **measured**, not estimated. Each row says which version a
 **What these numbers tell us:** Fast (the smallest model) was no quicker than Smooth. The GPU is not the limit today. Most of the time goes into writing and reading frame images on disk, and reloading the model for each chunk. That is exactly what the two speed updates target:
 
 1. **Quick wins:** lighter PNG compression, tuned engine threads, bigger chunks (fewer model reloads), overlapping stages, and hardware decoding.
-2. **Streaming engine:** a streaming mode for the MIT-licensed RIFE engine. The model loads once and frames flow from FFmpeg through the GPU and back in memory, with no image files on disk. File mode stays as the automatic fallback, and streaming only becomes the default once it is proven faster with identical output.
+2. **Streaming engine:** a streaming mode for the MIT-licensed RIFE engine. The model loads once and frames flow from FFmpeg through the GPU and back in memory, with no image files on disk. File mode stays as the automatic fallback. Streaming is now the default when its self-test passes, because it measured faster.
 
 ### Quality checks
 
