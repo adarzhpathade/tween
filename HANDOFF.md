@@ -53,14 +53,47 @@ Real numbers are in the README **Benchmarks** section; do not copy or invent num
 
 `orchestra/orchestrator.mjs` (`doctor`, `status`, `dispatch`, `review`, `accept`, `reject`, `takeover`, `submit`) and `watcher.mjs` run `agy` (Antigravity CLI) workers, each in its own git worktree `.worktrees/<id>` on branch `task/<id>`. Tasks are in `orchestra/tasks.json` with briefs in `orchestra/briefs/`; state is in the git-ignored `orchestra/runs/`. A worker gets 3 attempts; after that the orchestrator does the task itself. Accept only when checks pass, scope is respected and `WORKER_RULES.md` is followed. The orchestrator agent is `.claude/agents/tween-orchestrator.md`.
 
+## Status (2026-11-17)
+
+- **v0.1.0 is published** (not a draft) and marked latest: https://github.com/adarzhpathade/tween/releases/tag/v0.1.0. Release run 44043737164 was green.
+- **Assets:**
+  - `Tween_0.1.0_x64-setup.exe`
+  - `Tween_0.1.0_aarch64.dmg` (Apple Silicon only; Intel Mac support was dropped by the user)
+  - `Tween_0.1.0_amd64.AppImage`
+  - `Tween_0.1.0_amd64.deb`
+  - `rife-ncnn-vulkan-stream-{windows-x64.exe,linux-x64,macos-arm64}`
+  - `SHA256SUMS`
+- All public downloads return 200.
+- **main = `bd407e1`**, with CI green on all 3 OSes. Tasks T01-T24 are all merged.
+- **Default engine is `auto`:** stream when the stream binary is installed and passes its ~2 s self-test, otherwise file mode. Setup downloads the stream engine from the release matching the app version and checks it against `SHA256SUMS`. If that fails, file mode is used and setup still succeeds.
+- **Fresh-user test pending:** the dev machine's Tween data (`%APPDATA%pp.tween.desktop`, `%LOCALAPPDATA%pp.tween.desktop`, and the `tween-*` temp folders) was deleted so the user can test the published installer like a new user. Next session: ask for their findings and fix them in v0.1.1.
+
 ## Verified and not verified
 
-- Verified: Rust and frontend tests on all three OSes in CI; real GPU runs of file and stream modes on one Windows machine (RTX 4050 Laptop); release workflow definition (YAML valid), not yet run on a real tag.
-- Not verified: macOS and Linux real GPU runs; the stream asset download from a published release (the `#[ignore]` test `test_real_stream_download` needs a published release); signed or notarized installers (none yet, installers are unsigned); other GPU vendors.
+- Verified:
+  - Rust and frontend tests on all three OSes in CI.
+  - Real GPU runs of file and stream modes on one Windows machine (RTX 4050 Laptop).
+  - The release workflow on a real tag, which produced the published v0.1.0.
+- Not verified:
+  - The published installer and a fresh-install setup on a real PC (in progress with the user).
+  - macOS and Linux real GPU runs.
+  - Other GPU vendors.
+  - Signed or notarized installers (there are none; installers are unsigned, and Windows shows SmartScreen).
+  - The `#[ignore]` test `test_real_stream_download`, which can now run since the release is public.
 
 ## Next steps
 
-1. Tag `v0.1.0`, let the release workflow build the draft, check the assets and `SHA256SUMS`, publish, then run `test_real_stream_download` and a fresh-install setup on each OS.
-2. Run the benchmark on macOS and Linux, and on an AMD/Intel GPU, and add measured rows to the README.
-3. Code signing and notarization.
-4. Decide whether to expose the engine mode in settings.
+1. Collect the user's fresh-install test results, fix the issues, and ship v0.1.1. To release: bump the version in `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml`, `app/package.json` and `package.json` (the `check-version` job enforces they match), push `main`, wait for green CI, then tag `v0.1.1`. The release is created as a draft; publish it when the user approves.
+2. Run `cargo test -- --ignored test_real_stream_download` now that v0.1.0 is public.
+3. Run the benchmark on macOS and Linux, and on an AMD/Intel GPU (`npm --prefix app run bench -- -- --engine-mode stream --seconds 60`), and add measured rows to the README.
+4. Code signing and notarization (needs paid certificates; the user decides).
+5. Landing/download page, built from the README (features, benchmarks, supported systems).
+
+## Working with this user
+
+- Cheap subagents write the code (Sonnet `tween-orchestrator`, `agy` workers with `--auto-approve --sandbox`, 3 attempts each, then Sonnet takes over).
+- Claude runs pushes, CI checks, accepts and benchmarks directly. The user wants speed and does not want commands handed to them.
+- Commits use the noreply email `208534789+adarzhpathade@users.noreply.github.com` and end with the `Co-Authored-By` / `Claude-Session` trailers.
+- Never use VideoProc/Digiarty code or weights.
+- Never invent benchmark numbers.
+- Confirm UI design changes in the HTML mock (`design/app-design-v7-onboarding-v3.html`) before building them.
