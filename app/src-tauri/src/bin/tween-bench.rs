@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::SystemTime;
+use tween_lib::pipeline::runner::stream_engine_status;
 use tween_lib::pipeline::{
     probe, rife_exe, run_pipeline, GpuConfig, JobFinished, JobProgressEvent, JobRequest,
     PipelineConfig, Target, TargetValue,
@@ -237,9 +238,25 @@ async fn main() {
     };
 
     let args: Vec<String> = std::env::args().collect();
+    let mut clip_seconds: u32 = 8;
     let mut i = 1;
     while i < args.len() {
-        if args[i] == "--engine-mode" && i + 1 < args.len() {
+        let secs_arg = if args[i] == "--seconds" && i + 1 < args.len() {
+            i += 1;
+            Some(args[i].clone())
+        } else {
+            args[i].strip_prefix("--seconds=").map(|v| v.to_string())
+        };
+        if let Some(v) = secs_arg {
+            match v.parse::<u32>() {
+                Ok(n) if n >= 2 => clip_seconds = n,
+                _ => {
+                    eprintln!("--seconds expects an integer >= 2, got {:?}", v);
+                    std::process::exit(2);
+                }
+            }
+            i += 1;
+        } else if args[i] == "--engine-mode" && i + 1 < args.len() {
             let m = args[i + 1].to_lowercase();
             cfg.engine_mode = Some(m);
             i += 2;
@@ -263,9 +280,19 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // 8 seconds of generated 1080p 24 fps (testsrc2 + mandelbrot, hard cut at 4 s, 440 Hz audio)
-    let clip_path = bench_work.join("bench-1080p-24fps-8s.mp4");
-    println!("Generating benchmark test clip (1080p, 24 fps, 8 s, testsrc2 + mandelbrot)...");
+    // Generated 1080p 24 fps clip (testsrc2 + mandelbrot, hard cut at the midpoint, 440 Hz audio)
+    let half = clip_seconds as f64 / 2.0;
+    let clip_path = bench_work.join(format!("bench-1080p-24fps-{}s.mp4", clip_seconds));
+    println!(
+        "Generating benchmark test clip (1080p, 24 fps, {} s, testsrc2 + mandelbrot)...",
+        clip_seconds
+    );
+    let testsrc_in = format!("testsrc2=size=1920x1080:rate=24:duration={}", half);
+    let sine_in = format!("sine=frequency=440:duration={}", clip_seconds);
+    let filter = format!(
+        "[1:v]trim=duration={},setpts=PTS-STARTPTS,format=yuv420p[b];[0:v]format=yuv420p[a];[a][b]concat=n=2:v=1[v]",
+        half
+    );
 
     let gen_status = tokio::process::Command::new(&cfg.ffmpeg)
         .args([
@@ -276,7 +303,7 @@ async fn main() {
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=size=1920x1080:rate=24:duration=4",
+            &testsrc_in,
             "-f",
             "lavfi",
             "-i",
@@ -284,9 +311,9 @@ async fn main() {
             "-f",
             "lavfi",
             "-i",
-            "sine=frequency=440:duration=8",
+            &sine_in,
             "-filter_complex",
-            "[1:v]trim=duration=4,setpts=PTS-STARTPTS,format=yuv420p[b];[0:v]format=yuv420p[a];[a][b]concat=n=2:v=1[v]",
+            &filter,
             "-map",
             "[v]",
             "-map",
@@ -365,6 +392,15 @@ async fn main() {
         }
     };
 
+    // Time the stream self-test as its own span. The result is cached per configuration, so the
+    // pipeline's own check is then instant and its total time excludes the self-test.
+    let mut self_test_ms: Option<u128> = None;
+    if cfg.engine_mode.as_deref() != Some("file") {
+        let t0 = std::time::Instant::now();
+        let _ = stream_engine_status(&cfg).await;
+        self_test_ms = Some(t0.elapsed().as_millis());
+    }
+
     let res: JobFinished = run_pipeline(cfg.clone(), req, emit, cancel).await;
     println!();
 
@@ -439,12 +475,15 @@ async fn main() {
     let projected_mins = (projected_10min_seconds / 60.0).round() as u64;
 
     let version_str = get_version();
-    let job_desc = format!(
+    let mut job_desc = format!(
         "{}p {}->{} Smooth",
         probe_info.height,
         probe_info.fps.round() as u64,
         (probe_info.fps * 2.0).round() as u64
     );
+    if clip_seconds != 8 {
+        job_desc.push_str(&format!(", {} s", clip_seconds));
+    }
 
     let readme_row = format!(
         "| {} | {} | {} | **{:.1}** | ~{} min |",
@@ -474,6 +513,11 @@ async fn main() {
     println!("  Peak temp disk: {:.1} MB", peak_disk_mb);
     println!();
     println!("Stage times:");
+    if engine_mode == "Stream" {
+        if let Some(ms) = self_test_ms {
+            println!("Stream self-test: {} ms", ms);
+        }
+    }
     println!("  Analyse:        {} ms", stage_times.analyse_ms);
     println!("  Extract:        {} ms", stage_times.extract_ms);
     println!("  RIFE:           {} ms", stage_times.rife_ms);
