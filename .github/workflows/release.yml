@@ -310,8 +310,12 @@ jobs:
           cp stream-binaries/rife-stream-windows-x64/rife-ncnn-vulkan-stream.exe release-assets/rife-ncnn-vulkan-stream-windows-x64.exe
           cp stream-binaries/rife-stream-linux-x64/rife-ncnn-vulkan-stream release-assets/rife-ncnn-vulkan-stream-linux-x64
           cp stream-binaries/rife-stream-macos-arm64/rife-ncnn-vulkan-stream release-assets/rife-ncnn-vulkan-stream-macos-arm64
+          # Installers arrive in nested bundle folders; flatten them so the
+          # upload globs and SHA256SUMS see plain top-level files.
+          find release-assets -mindepth 2 -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) -exec mv -t release-assets {} +
+          find release-assets -mindepth 1 -type d -exec rm -rf {} +
           cd release-assets
-          sha256sum * > ../SHA256SUMS
+          find . -maxdepth 1 -type f -printf '%f\n' | sort | xargs sha256sum > ../SHA256SUMS
           mv ../SHA256SUMS SHA256SUMS
 
       - name: Inspect release assets
