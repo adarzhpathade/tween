@@ -199,6 +199,7 @@ fn locate_setup_config() -> Option<(PipelineConfig, String, String)> {
             rife_cmd: None,
             engine_mode: Some(engine_mode.to_lowercase()),
             rife_stream_cmd: None,
+            disable_hwaccel: None,
         };
 
         return Some((cfg, gpu_name, engine_mode));

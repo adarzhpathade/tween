@@ -575,6 +575,7 @@ mod tests {
             rife_cmd: Some(vec!["node".into(), fake_rife.to_string_lossy().to_string()]),
             engine_mode: None,
             rife_stream_cmd: None,
+            disable_hwaccel: None,
         };
 
         struct TestCase {
@@ -671,10 +672,13 @@ mod tests {
             let out_file = work.join(format!("out-{}.mp4", c.name));
             let out_str = out_file.to_string_lossy().to_string();
 
+            // Make only this case's fake engine fail, via an argument. A process-global
+            // env var would leak into other tests running in parallel.
+            let mut cfg = cfg.clone();
             if c.fail_gpu {
-                std::env::set_var("FAKE_RIFE_FAIL", "1");
-            } else {
-                std::env::remove_var("FAKE_RIFE_FAIL");
+                if let Some(rc) = cfg.rife_cmd.as_mut() {
+                    rc.push("--fake-fail".to_string());
+                }
             }
 
             let note_seen = Arc::new(Mutex::new(None::<String>));
@@ -736,7 +740,6 @@ mod tests {
             );
         }
 
-        std::env::remove_var("FAKE_RIFE_FAIL");
         let _ = std::fs::remove_dir_all(&work);
     }
 }

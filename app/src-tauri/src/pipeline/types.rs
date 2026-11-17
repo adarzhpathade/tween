@@ -141,6 +141,9 @@ pub struct PipelineConfig {
     pub engine_mode: Option<String>,
     #[serde(default)]
     pub rife_stream_cmd: Option<Vec<String>>,
+    /// Never use hardware decode for frame extraction (tests that need bit-exact frames).
+    #[serde(default)]
+    pub disable_hwaccel: Option<bool>,
 }
 
 fn default_ffmpeg() -> String {
@@ -168,6 +171,7 @@ impl Default for PipelineConfig {
             rife_cmd: None,
             engine_mode: None,
             rife_stream_cmd: None,
+            disable_hwaccel: None,
         }
     }
 }

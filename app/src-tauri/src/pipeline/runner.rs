@@ -640,7 +640,17 @@ pub async fn stream_engine_status(cfg: &PipelineConfig) -> Result<(), String> {
 }
 
 async fn run_stream_self_test_internal(cfg: &PipelineConfig, why: &mut String) -> bool {
-    let tmp = std::env::temp_dir().join(format!("tween-stream-selftest-{}", std::process::id()));
+    // Unique per call: self-tests of different configurations can run concurrently in one process.
+    static SELF_TEST_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = std::env::temp_dir().join(format!(
+        "tween-stream-selftest-{}-{}-{}",
+        std::process::id(),
+        SELF_TEST_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
     let _ = std::fs::remove_dir_all(&tmp);
     if std::fs::create_dir_all(&tmp).is_err() {
         return false;
@@ -1756,7 +1766,8 @@ where
     let extractor_ended = Arc::new(AtomicBool::new(false));
     let extractor_failed = Arc::new(Mutex::new(None::<String>));
 
-    let mut use_hwaccel = check_hwaccel_support(&cfg.ffmpeg, &info.file, &scale_in, tmp).await;
+    let mut use_hwaccel = !cfg.disable_hwaccel.unwrap_or(false)
+        && check_hwaccel_support(&cfg.ffmpeg, &info.file, &scale_in, tmp).await;
     let t_extract = Instant::now();
     let sync = ExtractorSync {
         pool: pool.clone(),
