@@ -15,7 +15,9 @@ pub mod types;
 mod e2e_tests;
 
 pub use clean::{
-    clean_temp, clear_temp, default_folders, storage_info, DefaultFolders, StorageInfo,
+    calculate_tween_temp_size, clean_temp, clear_temp, compute_default_folders,
+    compute_default_output_folder, compute_storage_info, default_folders,
+    delete_tween_temp_entries, execute_clear_temp, storage_info, DefaultFolders, StorageInfo,
 };
 pub use encoders::{get_encoder, EncoderDef, ENCODERS};
 pub use models::{rife_exe, rife_stream_exe, ModelDef, MODELS};

@@ -9,7 +9,6 @@ import {
   formatFps,
   getFpsFontSize,
   stepFpsAnimation,
-  computeMinCustomFps,
   computeFpsRows,
   getCustomFpsHint,
   checkCustomVal,
@@ -151,11 +150,12 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         return null;
       }
       const isMockOrPreview =
-        (import.meta.env.DEV && searchParams.get("mock") === "1") ||
-        searchParams.has("src") ||
-        searchParams.has("custom") ||
-        searchParams.has("customval") ||
-        (import.meta.env.DEV && stateParam === "ready");
+        import.meta.env.DEV &&
+        (searchParams.get("mock") === "1" ||
+          searchParams.has("src") ||
+          searchParams.has("custom") ||
+          searchParams.has("customval") ||
+          stateParam === "ready");
 
       if (isMockOrPreview) {
         const srcParam = parseFloat(searchParams.get("src") || "24");
@@ -349,10 +349,9 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
   // Frame rate strip state
   const MAXF = MAX_FPS;
-  const minCustomFps = computeMinCustomFps(sourceFps);
 
   const [selectedChoice, setSelectedChoice] = useState<string>(() => {
-    if (typeof window !== "undefined") {
+    if (import.meta.env.DEV && typeof window !== "undefined") {
       const p = previewParams();
       const ch = p.get("choice");
       if (ch) {
@@ -367,10 +366,13 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   });
 
   const [customFps, setCustomFps] = useState<number | null>(() => {
-    if (typeof window !== "undefined") {
+    if (import.meta.env.DEV && typeof window !== "undefined") {
       const p = previewParams();
       const cv = p.get("customval");
-      if (cv) return parseInt(cv, 10);
+      if (cv) {
+        const parsed = parseInt(cv, 10);
+        if (!isNaN(parsed)) return parsed;
+      }
       if (p.get("custom") === "applied") return 90;
     }
     const saved = localStorage.getItem("tween_last_custom_fps");
@@ -378,7 +380,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   });
 
   const [isEditingCustom, setIsEditingCustom] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
+    if (import.meta.env.DEV && typeof window !== "undefined") {
       const p = previewParams();
       return p.get("custom") === "edit";
     }
@@ -386,7 +388,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   });
   const [prevChoice, setPrevChoice] = useState<string>("2×");
   const [customInputStr, setCustomInputStr] = useState<string>(() => {
-    if (typeof window !== "undefined") {
+    if (import.meta.env.DEV && typeof window !== "undefined") {
       const p = previewParams();
       const cv = p.get("customval");
       if (cv) return cv;
@@ -399,6 +401,27 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     [customInputStr, sourceFps]
   );
 
+  const customCheck = useMemo(
+    () => checkCustomVal(customInputStr, sourceFps),
+    [customInputStr, sourceFps]
+  );
+  const isCustomInputValid = !customCheck.err && customCheck.v !== undefined;
+
+  const isCustomFpsValid = useMemo(() => {
+    if (customFps === null) return false;
+    const c = checkCustomVal(String(customFps), sourceFps);
+    return !c.err && c.v !== undefined;
+  }, [customFps, sourceFps]);
+
+  const hasInvalidCustom = isEditingCustom
+    ? !isCustomInputValid
+    : (selectedChoice === "Custom" && !isCustomFpsValid);
+
+  // While custom fps holds an invalid value, the Custom row must not be computed from it.
+  const effectiveCustomForRows = isEditingCustom
+    ? (isCustomInputValid ? customCheck.v! : null)
+    : (isCustomFpsValid ? customFps : null);
+
   const frailRef = useRef<HTMLElement | null>(null);
   const fsegRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLElement | null>(null);
@@ -409,7 +432,10 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   // Options adapt to the real source fps
-  const fpsRows = useMemo<FpsRow[]>(() => computeFpsRows(sourceFps, customFps), [sourceFps, customFps]);
+  const fpsRows = useMemo<FpsRow[]>(
+    () => computeFpsRows(sourceFps, effectiveCustomForRows),
+    [sourceFps, effectiveCustomForRows]
+  );
 
   // Keep selection valid as rows adapt
   useEffect(() => {
@@ -426,16 +452,25 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   // Compute active target FPS
   const targetFps = useMemo(() => {
     if (!sourceFps) return null;
+    if (isEditingCustom) {
+      return isCustomInputValid ? customCheck.v! : null;
+    }
     const activeRow = fpsRows.find((r) => r.key === selectedChoice);
     if (!activeRow) return sourceFps * 2;
     if (activeRow.isCustom) {
-      // A saved custom value may be invalid for this source (e.g. 50 saved, now a 60 fps video): clamp it.
-      return customFps !== null
-        ? Math.min(MAXF, Math.max(minCustomFps, customFps))
-        : (90 > sourceFps ? 90 : minCustomFps);
+      return isCustomFpsValid ? customFps : null;
     }
     return activeRow.fps;
-  }, [selectedChoice, fpsRows, sourceFps, customFps, minCustomFps]);
+  }, [
+    selectedChoice,
+    fpsRows,
+    sourceFps,
+    isEditingCustom,
+    isCustomInputValid,
+    customCheck.v,
+    isCustomFpsValid,
+    customFps,
+  ]);
 
   // Final target fps or custom input determines font size so counter fits strip
   const counterFontSize = useMemo(() => {
@@ -664,7 +699,7 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
 
   // Mock / preview query parameter support: ?custom=edit|applied&customval=90
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!import.meta.env.DEV || typeof window === "undefined") return;
     const params = previewParams();
     const cm = params.get("custom");
     const cv = params.get("customval");
@@ -746,19 +781,9 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   }, [syncRailPill]);
 
   const currentGainFrames = useMemo(() => {
-    if (!sourceFps) return null;
-    if (isEditingCustom) {
-      const c = checkVal(customInputStr);
-      if (!c.err && c.v !== undefined) {
-        return Math.max(0, Math.round(c.v - sourceFps));
-      }
-      return null;
-    }
-    if (targetFps !== null) {
-      return Math.max(0, Math.round(targetFps - sourceFps));
-    }
-    return null;
-  }, [isEditingCustom, customInputStr, checkVal, sourceFps, targetFps]);
+    if (!sourceFps || hasInvalidCustom || targetFps === null) return null;
+    return Math.max(0, Math.round(targetFps - sourceFps));
+  }, [sourceFps, hasInvalidCustom, targetFps]);
 
   // Trim editor state
   const [inT, setInT] = useState<number>(0);
@@ -800,15 +825,25 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     }
   }, [duration]);
 
+  // Interpolate is enabled when a video is loaded, target fps is determined, and custom value is not invalid
+  const isInterpolateEnabled = Boolean(
+    isLoaded &&
+      targetFps !== null &&
+      !hasInvalidCustom
+  );
+
   // Handle Start
   const handleStart = useCallback(() => {
-    if (!isLoaded || !probeInfo) return;
+    if (!isInterpolateEnabled || !isLoaded || !probeInfo) return;
     localStorage.setItem("tween_last_model", selectedModel);
     localStorage.setItem("tween_last_encoder", selectedEncoder);
     localStorage.setItem("tween_last_quality", String(quality));
     localStorage.setItem("tween_last_fps_choice", selectedChoice);
-    if (selectedChoice === "Custom" && customFps !== null) {
-      localStorage.setItem("tween_last_custom_fps", String(customFps));
+    if (selectedChoice === "Custom") {
+      const finalCustom = isEditingCustom && isCustomInputValid ? customCheck.v! : customFps;
+      if (finalCustom !== null) {
+        localStorage.setItem("tween_last_custom_fps", String(finalCustom));
+      }
     }
 
     const tFps = targetFps || (sourceFps ? sourceFps * 2 : 48);
@@ -1004,13 +1039,15 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         handleSetOut();
       } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        handleStart();
+        if (isInterpolateEnabled) {
+          handleStart();
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [togglePlay, stepByFrames, handleSetIn, handleSetOut, handleStart]);
+  }, [togglePlay, stepByFrames, handleSetIn, handleSetOut, handleStart, isInterpolateEnabled]);
 
   // Video loader function
   const loadVideo = useCallback(async (filePath: string) => {
@@ -1277,10 +1314,13 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
   // Estimates calculation
   const trimDuration = isLoaded ? Math.max(0.1, outT - inT) : 0;
   const trimFrames = isLoaded && sourceFps ? Math.round(trimDuration * sourceFps) : 0;
-  const estFrames = isLoaded && sourceFps && targetFps ? Math.round(trimFrames * (targetFps / sourceFps)) : 0;
+  const estFrames =
+    isLoaded && sourceFps && targetFps !== null && !hasInvalidCustom
+      ? Math.round(trimFrames * (targetFps / sourceFps))
+      : 0;
 
   const estTime = useMemo(() => {
-    if (!isLoaded || !estFrames) return "—";
+    if (!isLoaded || hasInvalidCustom || targetFps === null || !estFrames) return "—";
     let speedFps = 38;
     if (setupConfig?.gpu?.ms && setupConfig.gpu.ms > 0) {
       const ms = setupConfig.gpu.ms;
@@ -1291,12 +1331,12 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${m}m ${String(s).padStart(2, "0")}s`;
-  }, [isLoaded, estFrames, setupConfig?.gpu?.ms, probeInfo?.width, probeInfo?.height]);
+  }, [isLoaded, hasInvalidCustom, targetFps, estFrames, setupConfig?.gpu?.ms, probeInfo?.width, probeInfo?.height]);
 
   const estSizeMB = useMemo(() => {
-    if (!isLoaded || !targetFps) return "—";
+    if (!isLoaded || hasInvalidCustom || targetFps === null) return "—";
     return String(Math.max(1, Math.round((trimDuration * 1.24 * targetFps) / 48)));
-  }, [isLoaded, trimDuration, targetFps]);
+  }, [isLoaded, hasInvalidCustom, trimDuration, targetFps]);
 
   // Warnings
   const warnings = useMemo(() => {
@@ -1868,21 +1908,26 @@ export const ReadyScreen: React.FC<ReadyScreenProps> = ({
         <div className="ifoot">
           <div className="est nv">
             <span>
-              ~ <b id="estT">{isLoaded ? estTime : "—"}</b>
+              ~ <b id="estT">{isLoaded && !hasInvalidCustom && targetFps !== null ? estTime : "—"}</b>
             </span>
             <span>
-              <b id="estF">{isLoaded ? estFrames.toLocaleString() : "—"}</b> frames
+              <b id="estF">
+                {isLoaded && !hasInvalidCustom && targetFps !== null && estFrames > 0
+                  ? estFrames.toLocaleString()
+                  : "—"}
+              </b>{" "}
+              frames
             </span>
             <span>
-              ~ <b id="estS">{isLoaded ? `${estSizeMB}` : "—"}</b> MB
+              ~ <b id="estS">{isLoaded && !hasInvalidCustom && targetFps !== null ? estSizeMB : "—"}</b> MB
             </span>
           </div>
 
           <button
             type="button"
-            className={`go ${isLoaded ? "v-ready v-done" : "off v-empty"}`}
+            className={`go ${isInterpolateEnabled ? "v-ready v-done" : "off v-empty"}`}
             onClick={handleStart}
-            disabled={!isLoaded}
+            disabled={!isInterpolateEnabled}
           >
             <span>Interpolate</span>
             <kbd>Ctrl ↵</kbd>
