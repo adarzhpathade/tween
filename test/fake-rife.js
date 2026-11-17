@@ -9,7 +9,7 @@ const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : null; };
 const inDir = opt('-i'), outDir = opt('-o');
 const files = fs.readdirSync(inDir).sort();
 const n = Number(opt('-n')) || files.length * 2;
-if (process.env.FAKE_RIFE_FAIL && !process.argv.includes('-1')) { console.error('vkQueueSubmit failed'); process.exit(255); }
+if ((process.env.FAKE_RIFE_FAIL || process.argv.includes('--fake-fail')) && !process.argv.includes('-1')) { console.error('vkQueueSubmit failed'); process.exit(255); }
 process.stderr.write('[0 Fake GPU]  queueC=0[1]\n');
 for (let i = 0; i < n; i++) {
   const { sx, t } = rifeMap(i, files.length, n);

@@ -141,6 +141,9 @@ pub struct PipelineConfig {
     pub engine_mode: Option<String>,
     #[serde(default)]
     pub rife_stream_cmd: Option<Vec<String>>,
+    /// Never use hardware decode for frame extraction (tests that need bit-exact frames).
+    #[serde(default)]
+    pub disable_hwaccel: Option<bool>,
 }
 
 fn default_ffmpeg() -> String {
@@ -168,6 +171,7 @@ impl Default for PipelineConfig {
             rife_cmd: None,
             engine_mode: None,
             rife_stream_cmd: None,
+            disable_hwaccel: None,
         }
     }
 }
@@ -246,4 +250,7 @@ pub struct JobFinished {
     pub peak_temp_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage_times: Option<StageTimes>,
+    /// Why a requested stream run used file mode instead (self-test or run failure).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine_fallback_reason: Option<String>,
 }

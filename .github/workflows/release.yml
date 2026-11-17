@@ -1,0 +1,213 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-version:
+    name: Check version matches tag
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check version matches tag
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+
+            const ref = process.env.GITHUB_REF || "";
+            const refName = process.env.GITHUB_REF_NAME || "";
+
+            let expectedVersion = null;
+            if (refName.startsWith("v")) {
+              expectedVersion = refName.slice(1);
+            } else if (ref.startsWith("refs/tags/v")) {
+              expectedVersion = ref.replace("refs/tags/v", "");
+            }
+
+            const tauriConf = JSON.parse(fs.readFileSync("app/src-tauri/tauri.conf.json", "utf8"));
+            const tauriVer = tauriConf.version;
+
+            const cargoToml = fs.readFileSync("app/src-tauri/Cargo.toml", "utf8");
+            const cargoMatch = cargoToml.match(/^version\s*=\s*"([^"]+)"/m);
+            if (!cargoMatch) {
+              console.error("Could not find version in app/src-tauri/Cargo.toml");
+              process.exit(1);
+            }
+            const cargoVer = cargoMatch[1];
+
+            const appPkg = JSON.parse(fs.readFileSync("app/package.json", "utf8"));
+            const appPkgVer = appPkg.version;
+
+            const rootPkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const rootPkgVer = rootPkg.version;
+
+            console.log("--- Version Check Summary ---");
+            console.log(`Git ref:          ${ref || "(unset)"}`);
+            console.log(`Git ref_name:     ${refName || "(unset)"}`);
+            console.log(`Expected version: ${expectedVersion || "(none - validating internal consistency)"}`);
+            console.log(`tauri.conf.json:  ${tauriVer}`);
+            console.log(`Cargo.toml:       ${cargoVer}`);
+            console.log(`app/package.json: ${appPkgVer}`);
+            console.log(`package.json:     ${rootPkgVer}`);
+
+            const errors = [];
+
+            if (expectedVersion) {
+              if (tauriVer !== expectedVersion) {
+                errors.push(`tauri.conf.json (${tauriVer}) != tag version (${expectedVersion})`);
+              }
+              if (cargoVer !== expectedVersion) {
+                errors.push(`Cargo.toml (${cargoVer}) != tag version (${expectedVersion})`);
+              }
+              if (appPkgVer !== expectedVersion) {
+                errors.push(`app/package.json (${appPkgVer}) != tag version (${expectedVersion})`);
+              }
+              if (rootPkgVer !== expectedVersion) {
+                errors.push(`package.json (${rootPkgVer}) != tag version (${expectedVersion})`);
+              }
+            } else {
+              if (tauriVer !== cargoVer || tauriVer !== appPkgVer || tauriVer !== rootPkgVer) {
+                errors.push(`Version mismatch: tauri=${tauriVer}, cargo=${cargoVer}, appPkg=${appPkgVer}, rootPkg=${rootPkgVer}`);
+              }
+            }
+
+            if (errors.length > 0) {
+              console.error("\n::error::Version check failed!");
+              for (const err of errors) {
+                console.error(`::error::  - ${err}`);
+              }
+              process.exit(1);
+            }
+
+            console.log("\n[OK] Version check passed.");
+          '
+
+  build:
+    name: Build (${{ matrix.target_name }})
+    needs: [check-version]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target_name: windows-x64
+            os: windows-latest
+            bundle_args: --bundles nsis
+            artifact_name: tween-windows-x64
+            artifact_paths: app/src-tauri/target/**/bundle/nsis/*.exe
+          - target_name: macos-arm64
+            os: macos-latest
+            rust_target: aarch64-apple-darwin
+            bundle_args: --target aarch64-apple-darwin --bundles dmg
+            artifact_name: tween-macos-arm64
+            artifact_paths: app/src-tauri/target/**/bundle/dmg/*.dmg
+          - target_name: linux-x64
+            os: ubuntu-22.04
+            bundle_args: --bundles appimage,deb
+            artifact_name: tween-linux-x64
+            artifact_paths: |
+              app/src-tauri/target/**/bundle/appimage/*.AppImage
+              app/src-tauri/target/**/bundle/deb/*.deb
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            squashfs-tools \
+            patchelf \
+            desktop-file-utils \
+            xdg-utils
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target || '' }}
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build Tauri app
+        working-directory: app
+        run: npx tauri build ${{ matrix.bundle_args }}
+        shell: bash
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release (Draft)
+    needs: [check-version, build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all built installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tween-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Inspect release assets
+        run: |
+          echo "=== Release Assets ==="
+          ls -la release-assets
+
+      - name: Create draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          draft: true
+          name: Tween ${{ github.ref_name }}
+          body_path: .github/release-notes.md
+          files: |
+            release-assets/*.exe
+            release-assets/*.dmg
+            release-assets/*.deb
+            release-assets/*.AppImage

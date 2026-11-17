@@ -73,6 +73,7 @@ fn make_test_cfg(work: &Path, fake_rife: &Path) -> PipelineConfig {
         rife_cmd: Some(vec!["node".into(), fake_rife.to_string_lossy().to_string()]),
         engine_mode: None,
         rife_stream_cmd: None,
+        disable_hwaccel: None,
     }
 }
 
@@ -1378,7 +1379,9 @@ async fn test_e2e_stream_engine_matches_file_mode() {
     let out = run_cmd_timeout(gen_cmd, Duration::from_secs(30)).await;
     assert!(out.status.success(), "Failed to generate 10s test clip");
 
-    let cfg_probe = make_test_cfg(&work, &fake_rife);
+    let mut cfg_probe = make_test_cfg(&work, &fake_rife);
+    // Pass-through frames must be bit-exact between modes, so decode in software for both.
+    cfg_probe.disable_hwaccel = Some(true);
     let info = probe(&cfg_probe, clip.to_str().unwrap())
         .await
         .expect("probe failed");
@@ -1413,6 +1416,7 @@ async fn test_e2e_stream_engine_matches_file_mode() {
     // 2. Run stream mode
     let mut cfg_stream = make_test_cfg(&work, &fake_rife);
     cfg_stream.engine_mode = Some("stream".into());
+    cfg_stream.disable_hwaccel = Some(true);
     cfg_stream.rife_stream_cmd = Some(vec!["node".into(), fake_stream.to_string_lossy().to_string()]);
     let out_stream = work.join("out_stream.mp4");
     let req_stream = JobRequest {

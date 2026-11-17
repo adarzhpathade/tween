@@ -971,6 +971,66 @@
           "warnings"
         ]
       ]
+    },
+    {
+      "id": "T24",
+      "title": "Setup downloads the stream engine (hold until released)",
+      "brief": "briefs/T24-setup-stream-download.md",
+      "deps": [
+        "T20",
+        "T22",
+        "HOLD-until-released"
+      ],
+      "checks": [
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "install",
+          "--no-audit",
+          "--no-fund"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "build"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "typecheck"
+        ],
+        [
+          "cargo",
+          "test",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml"
+        ],
+        [
+          "cargo",
+          "clippy",
+          "--manifest-path",
+          "app/src-tauri/Cargo.toml",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        [
+          "npm",
+          "--prefix",
+          "app",
+          "run",
+          "tauri",
+          "--",
+          "build",
+          "--no-bundle"
+        ]
+      ]
     }
   ]
 }
