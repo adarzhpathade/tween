@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://tween.adarzh.tech/sitemap.xml
