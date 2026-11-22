@@ -14,6 +14,7 @@ A desktop app that raises a video's frame rate (for example 24 to 48 or 60 fps) 
 - `orchestra/`: the Antigravity worker system (see below).
 - `test/`: Node tests and stand-in engines (`fake-rife.js`, `fake-rife-stream.js`, `--fake-fail` makes them fail on purpose).
 - `src/` (repo root): the older Electron reference pipeline, kept for the GPU smoke test and reference tests.
+- `site/`: the website (static `index.html` + `download.html`), deployed to Vercel. See **Website** below.
 - `bench-results/`, `out/`: generated output.
 
 ## Build, test, run
@@ -53,7 +54,7 @@ Real numbers are in the README **Benchmarks** section; do not copy or invent num
 
 `orchestra/orchestrator.mjs` (`doctor`, `status`, `dispatch`, `review`, `accept`, `reject`, `takeover`, `submit`) and `watcher.mjs` run `agy` (Antigravity CLI) workers, each in its own git worktree `.worktrees/<id>` on branch `task/<id>`. Tasks are in `orchestra/tasks.json` with briefs in `orchestra/briefs/`; state is in the git-ignored `orchestra/runs/`. A worker gets 3 attempts; after that the orchestrator does the task itself. Accept only when checks pass, scope is respected and `WORKER_RULES.md` is followed. The orchestrator agent is `.claude/agents/tween-orchestrator.md`.
 
-## Status (2026-11-17)
+## Status (2026-11-17, app)
 
 - **v0.1.0 is published** (not a draft) and marked latest: https://github.com/adarzhpathade/tween/releases/tag/v0.1.0. Release run 44043737164 was green.
 - **Assets:**
@@ -66,7 +67,16 @@ Real numbers are in the README **Benchmarks** section; do not copy or invent num
 - All public downloads return 200.
 - **main = `bd407e1`**, with CI green on all 3 OSes. Tasks T01-T24 are all merged.
 - **Default engine is `auto`:** stream when the stream binary is installed and passes its ~2 s self-test, otherwise file mode. Setup downloads the stream engine from the release matching the app version and checks it against `SHA256SUMS`. If that fails, file mode is used and setup still succeeds.
-- **Fresh-user test pending:** the dev machine's Tween data (`%APPDATA%pp.tween.desktop`, `%LOCALAPPDATA%pp.tween.desktop`, and the `tween-*` temp folders) was deleted so the user can test the published installer like a new user. Next session: ask for their findings and fix them in v0.1.1.
+- **Fresh-user test pending:** the dev machine's Tween data (`%APPDATA%\app.tween.desktop`, `%LOCALAPPDATA%\app.tween.desktop`, and the `tween-*` temp folders) was deleted so the user can test the published installer like a new user. Next session: ask for their findings and fix them in v0.1.1.
+
+## Website (2026-11-22)
+
+- **Live:** https://tween.adarzh.tech (also https://tween-site.vercel.app). Vercel project `tween-site` (team `adarz`), deployed by running `vercel deploy --prod --yes` inside `site/`. DNS: CNAME `tween` -> `841814a690bc0a17.vercel-dns-017.com` at the adarzh.tech DNS host (nameservers `ns1-4.dns.host`, not Vercel). `vercel domains verify tween.adarzh.tech` reports it configured.
+- **Files:** `index.html` (landing), `download.html` (direct downloads), `robots.txt`, `sitemap.xml`, `vercel.json` (png caching, nosniff, referrer policy), `icon-64.png` (the 128 px app icon), `favicon.png`. `.vercel/` and `.env*` are git-ignored (`site/.gitignore`) and excluded from upload (`site/.vercelignore`).
+- **Design:** modeled on nualt.fr's layout in Tween colours: dark `#111` sections with `#161615` alternates, hairline grids, Geist + Geist Mono, amber `#d9a55b` only as an accent (heading emphasis words, buttons, numbers, eyebrow squares). The user rejected full-amber sections, the custom cursor, magnetic buttons, demo lanes, the marquee and heavy hover effects; keep it calm. Smooth scroll is Lenis 1.1.13 from unpkg, the scrollbar is hidden, parallax is subtle (`data-speed`: hero -.1, h2 .025). Hero = info strip, headline, pixel-frame strip that rises in place (the user removed the description/button block).
+- **Download page:** OS detection (`?os=win|mac|linux` override for testing) marks a recommended column; buttons link straight to the `v0.1.0` release assets; install steps in tabs. **On each release, update every `v0.1.0` / `0.1.0` URL, file name and size in `download.html`, plus the version in `index.html`, the JSON-LD and the `sitemap.xml` lastmod, then redeploy.**
+- **SEO:** titles, descriptions, canonical, OG/Twitter tags, SoftwareApplication + FAQPage JSON-LD (index), BreadcrumbList (download), one h1 per page. Google Search Console: the user's **Domain property `adarzh.tech`** covers the subdomain; the sitemap was submitted and indexing requested on 2026-11-22. The GitHub repo's Website field points to the site, topics were added, and the README links it (`216084a`).
+- **Website todo:** a 1200x630 OG image (currently the 128 px icon); optional pages (Tween vs Flowframes/SVP, 24->60 fps how-to, what RIFE is) added to the sitemap; Bing Webmaster import; community posts (Show HN, r/VideoEditing, AlternativeTo, Product Hunt). The user is adding a Tween card to their portfolio repo (`adrz-portfolio`) in a separate chat; do not touch that repo.
 
 ## Verified and not verified
 
@@ -87,7 +97,8 @@ Real numbers are in the README **Benchmarks** section; do not copy or invent num
 2. Run `cargo test -- --ignored test_real_stream_download` now that v0.1.0 is public.
 3. Run the benchmark on macOS and Linux, and on an AMD/Intel GPU (`npm --prefix app run bench -- -- --engine-mode stream --seconds 60`), and add measured rows to the README.
 4. Code signing and notarization (needs paid certificates; the user decides).
-5. Landing/download page, built from the README (features, benchmarks, supported systems).
+5. Website follow-ups (see **Website todo**). Keep `download.html` in sync with each release.
+6. Fix the Windows-only failure of `test_e2e_stream_engine_matches_file_mode` (pixel mismatch at `e2e_tests.rs:1468`, seen on main `bd407e1`/`12c9b7f`).
 
 ## Working with this user
 
@@ -96,4 +107,5 @@ Real numbers are in the README **Benchmarks** section; do not copy or invent num
 - Commits use the noreply email `208534789+adarzhpathade@users.noreply.github.com` and end with the `Co-Authored-By` / `Claude-Session` trailers.
 - Never use VideoProc/Digiarty code or weights.
 - Never invent benchmark numbers.
+- For the website, show screenshots and keep accents minimal; the user dislikes busy effects.
 - Confirm UI design changes in the HTML mock (`design/app-design-v7-onboarding-v3.html`) before building them.
