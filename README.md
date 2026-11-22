@@ -2,6 +2,8 @@
 
 **Between every frame.** Tween is a desktop app that makes video smoother by creating the frames your footage never had. It turns 24 or 30 fps into 48, 60, 120 fps or any rate up to 240. It runs on your own graphics card, and your videos never leave your device.
 
+**Website & download:** [tween.adarzh.tech](https://tween.adarzh.tech)
+
 <p align="center"><img src="design/brand/tween-logo.png" alt="Tween logo" width="160"></p>
 
 > **Status:** pre-release (v0.1.0). Installers for Windows, macOS and Linux are built automatically on every change. They are not code-signed yet, so Windows and macOS show a warning on first launch.
